@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Archivo"; font-weight: 800; src: url("node_modules/@fontsource/archivo/files/archivo-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Archivo"; font-weight: 700; src: url("node_modules/@fontsource/archivo/files/archivo-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 400; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 600; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1700px; background: #F4F6F6; font-family: "Plex", sans-serif; color: #152120; }
+#canvas { width: 1700px; padding: 44px 48px 40px; background: #F4F6F6; }
+h1 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 40px; letter-spacing: -0.01em; line-height: 1; }
+.sub { font-size: 18px; color: #5A6866; margin-top: 10px; }
+.legend { display: flex; gap: 16px; margin-top: 18px; font-size: 14px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.dia { width: 12px; height: 12px; transform: rotate(45deg); display: inline-block; background: #152120; }
+svg { display: block; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1>PANIC (Predictive Anomaly Notification for Interposer Components)</h1>
+  <div class="sub">Project Gantt Chart · CS 401R Final Project · Team PANIC! at the Data Center · Nov 20 to Dec 17, 2026</div>
+  <div class="legend" id="legend"></div>
+  <svg id="chart"></svg>
+</div>
+<script>
+const PEOPLE = {
+  all: {label: 'Everyone', color: '#56636A'},
+  rj: {label: 'Teammate 1 · Lead and ML', color: '#0E7A6C'},
+  t2: {label: 'Teammate 2 · Data and platform', color: '#2F6FB3'},
+  t3: {label: 'Teammate 3 · MLOps and reliability', color: '#6B57C9'},
+  t4: {label: 'Teammate 4 · App and business', color: '#A3478A'},
+};
+const TASKS = [
+  ['all', 'Project Charter (Teammate 1 submits)', '11-20', '11-21'],
+  ['all', 'Final presentation + Q&A', '12-16', '12-16'],
+  ['rj', 'Explore data, write feature rules', '11-20', '11-22'],
+  ['rj', 'Train first models on laptop (MLflow)', '11-22', '11-24'],
+  ['rj', 'Tune thresholds, approve models', '11-27', '12-01'],
+  ['rj', 'Replay real months: catches, false alarms', '12-03', '12-06'],
+  ['rj', 'PRR, governance, executive summary', '12-05', '12-12'],
+  ['t2', 'AWS account, IAM, Budgets, Terraform', '11-20', '11-24'],
+  ['t2', 'Glue job, data contract, Feature Store', '11-25', '12-01'],
+  ['t2', 'Fleet simulator (synthetic fleet)', '11-28', '12-02'],
+  ['t2', 'Kinesis stream + hourly EventBridge', '12-02', '12-06'],
+  ['t2', 'Scale test (630K errors/day)', '12-08', '12-10'],
+  ['t2', 'Assemble design doc + abstract', '12-10', '12-15'],
+  ['t2', 'Push to GitHub, terraform destroy', '12-17', '12-17'],
+  ['t3', 'API contract with Teammate 4', '11-21', '11-22'],
+  ['t3', 'SageMaker Pipelines + GitHub Actions', '11-24', '12-01'],
+  ['t3', 'Serverless SageMaker endpoint', '12-02', '12-03'],
+  ['t3', 'CloudWatch, Evidently drift, runbook', '12-04', '12-08'],
+  ['t3', 'Slide deck', '12-10', '12-15'],
+  ['t4', 'App sketch + API contract', '11-20', '11-22'],
+  ['t4', 'Lambda + API Gateway', '11-30', '12-03'],
+  ['t4', 'Step Functions, SNS, DynamoDB', '12-02', '12-05'],
+  ['t4', 'Streamlit fleet dashboard', '12-04', '12-08'],
+  ['t4', 'Economics + Pricing Calculator', '12-08', '12-10'],
+  ['t4', 'Demo script + 3 to 5 min video', '12-10', '12-15'],
+];
+const MILESTONES = [
+  ['11-21', 'Charter due', true], ['11-24', 'Model pipeline', false], ['11-28', 'Lab 6', false],
+  ['12-01', 'Lab 7', false], ['12-10', 'Code complete', false], ['12-16', 'Present', true], ['12-17', 'Final due', true],
+];
+const day = md => { const [m, d] = md.split('-').map(Number); return Math.round((Date.UTC(2026, m - 1, d) - Date.UTC(2026, 10, 20)) / 864e5); };
+const NDAYS = 28, LABEL = 380, W = 1604, DW = (W - LABEL) / NDAYS, ROW = 34, GROUP = 34;
+const svgNS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, text) => { const e = document.createElementNS(svgNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; };
+const svg = document.getElementById('chart');
+const X = i => LABEL + i * DW;
+let y = 0;
+// header: weekday letters + dates
+const HEAD = 96;
+const g0 = el('g', {});
+const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+for (let i = 0; i < NDAYS; i++) {
+  const dt = new Date(Date.UTC(2026, 10, 20 + i)); const wd = dt.getUTCDay();
+  if (wd === 0 || wd === 6) g0.appendChild(el('rect', {x: X(i), y: HEAD - 34, width: DW, height: 4000, fill: '#E9EEED'}));
+  if (dt.getUTCMonth() === 10 && dt.getUTCDate() === 26) g0.appendChild(el('rect', {x: X(i), y: HEAD - 34, width: DW, height: 4000, fill: '#F3E3C2'}));
+  g0.appendChild(el('text', {x: X(i) + DW / 2, y: HEAD - 14, 'text-anchor': 'middle', 'font-size': 14, fill: '#5A6866', 'font-family': 'Plex'}, String(dt.getUTCDate())));
+  if (wd === 1 || i === 0) g0.appendChild(el('text', {x: X(i) + 2, y: HEAD - 42, 'font-size': 14, 'font-weight': 600, fill: '#152120', 'font-family': 'Plex'}, `${wd === 1 ? 'Week of ' : ''}${months[dt.getUTCMonth()]} ${dt.getUTCDate()}`));
+}
+svg.appendChild(g0);
+y = HEAD;
+// milestones row
+const mg = el('g', {});
+mg.appendChild(el('text', {x: 0, y: y + 30, 'font-size': 17, 'font-weight': 700, fill: '#152120', 'font-family': 'Archivo'}, 'Course milestones'));
+MILESTONES.forEach(([d, label, graded], k) => {
+  const cx = X(day(d)) + DW / 2, cy = y + 24;
+  mg.appendChild(el('rect', {x: cx - 8, y: cy - 8, width: 16, height: 16, transform: `rotate(45 ${cx} ${cy})`, fill: graded ? '#C8323F' : '#152120'}));
+  const last = k === MILESTONES.length - 1;
+  mg.appendChild(el('text', {x: last ? cx + 12 : cx, y: cy + 30 + (k % 2) * 16, 'text-anchor': last ? 'end' : 'middle', 'font-size': 13.5, 'font-weight': graded ? 600 : 400, fill: graded ? '#C8323F' : '#152120', 'font-family': 'Plex'}, label));
+});
+svg.appendChild(mg);
+y += 84;
+// grid lines (weeks)
+for (let i = 0; i <= NDAYS; i++) { const dt = new Date(Date.UTC(2026, 10, 20 + i)); if (dt.getUTCDay() === 1 || i === 0 || i === NDAYS) svg.insertBefore(el('line', {x1: X(i), x2: X(i), y1: HEAD - 34, y2: 4000, stroke: '#C9D3D1', 'stroke-width': 1}), svg.firstChild.nextSibling); }
+// groups
+for (const who of ['all', 'rj', 't2', 't3', 't4']) {
+  const p = PEOPLE[who];
+  svg.appendChild(el('line', {x1: 0, x2: W, y1: y + 4, y2: y + 4, stroke: '#152120', 'stroke-width': 1.5}));
+  svg.appendChild(el('rect', {x: 0, y: y + 13, width: 14, height: 14, rx: 3, fill: p.color}));
+  svg.appendChild(el('text', {x: 22, y: y + 26, 'font-size': 17, 'font-weight': 700, fill: '#152120', 'font-family': 'Archivo'}, p.label));
+  y += GROUP + 4;
+  for (const [w, name, s, e] of TASKS.filter(t => t[0] === who)) {
+    svg.appendChild(el('text', {x: 22, y: y + 21, 'font-size': 15, fill: '#152120', 'font-family': 'Plex'}, name));
+    const x0 = X(day(s)) + 2, x1 = X(day(e) + 1) - 2;
+    svg.appendChild(el('rect', {x: x0, y: y + 6, width: x1 - x0, height: 22, rx: 6, fill: p.color}));
+    y += ROW;
+  }
+  y += 6;
+}
+svg.setAttribute('width', W); svg.setAttribute('height', y + 10); svg.setAttribute('viewBox', `0 0 ${W} ${y + 10}`);
+// Thanksgiving label
+svg.appendChild(el('text', {x: X(day('11-26')) + DW / 2, y: HEAD - 64, 'text-anchor': 'middle', 'font-size': 12, fill: '#8A6A1E', 'font-family': 'Plex', 'font-weight': 600}, 'Thanksgiving'));
+// legend
+const lg = document.getElementById('legend');
+for (const k of ['rj', 't2', 't3', 't4', 'all']) lg.insertAdjacentHTML('beforeend', `<span><i class="sw" style="background:${PEOPLE[k].color}"></i>${PEOPLE[k].label}</span>`);
+lg.insertAdjacentHTML('beforeend', `<span><i class="dia" style="background:#C8323F"></i>Graded deadline</span><span><i class="dia"></i>Suggested or lab due</span><span><i class="sw" style="background:#E9EEED;border:1px solid #C9D3D1"></i>Weekend</span>`);
+document.fonts.ready.then(() => document.body.setAttribute('data-ready', '1'));
+</script>
+</body>
+</html>

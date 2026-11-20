@@ -1,0 +1,875 @@
+# Ch24-Deployment-Scaling.pdf (extracted text, 27 pages)
+
+<!-- page 1 -->
+Chapter 24
+Deployment and Scaling: Getting AI
+Into the World and Growing with
+Confidence
+24.1 Motivation
+AmajorretailbankdeploysanAI-poweredloanunderwritingassistant. Thetwelve-weekpilot,runout
+of one regional office with 200 loan officers, cuts decision time by 40 percent and earns high officer
+satisfactionscores. Themodelclearseveryevaluationgate,andexecutivesapproveaglobalrolloutto
+4,000officersacross18countries. Sixmonthslater,therollouthasstalled.
+Themodelservinginfrastructuresaturatesunderconcurrentload. Inthepilot,200userstriggeredscor-
+ingjobsoneafteranotherthroughtheday.Atscale,thousandsofconcurrentrequestsexposecontention
+thatthestresstestsneversimulated. Thefeaturepipelinewasbuiltforasinglecurrencynormalization
+scheme,andEuropeanbranchessenddatainformatsthatquietlybreakupstreamfeaturecomputation,
+sostalepredictionsgooutlookingcorrect. Germany’sBaFinrequiresexplainabilitydocumentationthat
+wasneverpartofthepilot’sacceptancecriteria. LoanofficersinSoutheastAsiagotadeploymentemail
+and no training. Almost none of them use the system, and the few who tried hit edge cases the pilot
+teamhadneverseen. Whenascoringpipelinefailuresilentlyproducesthree-day-oldpredictions, no-
+bodyknowswhosejobitistofixit.
+Nothingwaswrongwiththemodel. Thedeploymentfailedbecauseacontrolledpilotandanenterprise
+rolloutaredifferentproblems.Thepilotranasacontrolledexperiment,withselectedusersinamanaged
+environment. Productionrunsunderunpredictableloadacrossheterogeneousenvironments. Itsusers
+hadnopartinthedesign,theregulationsitanswerstovarybyjurisdiction,andtheteamsthatownitwere
+notpresentwhenitwasbuilt.
+Thischapter,thelastintheBuildpartofthebook,covershowtotakeasystemthatworksandgetitinto
+productionatenterprisescale.
+24.2 Challenge
+HowdoyoutakeanAIsystemthatpasseseveryevaluationgateanddeployitreliablyintoproduction
+atenterprisescale,managingtheinfrastructure,servingarchitecture,organizationalreadiness,resilience
+requirements,andoperationalhandoffthatonlysurfacewhenthesystemservesrealusersatfullvolume?
+547
+
+<!-- page 2 -->
+24.3 Objectives
+Bytheendofthischapter,youwillbeableto:
+1. Selectadeploymentstrategyappropriatetotheriskprofileandrollbackrequirementsofagiven
+AIsystem
+2. Designservinginfrastructurethatmeetslatency, throughput, cost, andreliabilityrequirementsat
+enterprisescaleacrosssynchronous,asynchronous,andstreamingpatterns
+3. Apply horizontal and vertical scaling patterns for AI inference workloads, including multi-region
+deploymentandLLM-specificscalingtechniques
+4. Designresiliencearchitecturewithgracefuldegradation,circuitbreakers,anddisasterrecoveryfor
+productionAIsystems
+5. Definetheorganizationalreadinessrequirementsthatseparatesuccessfulenterpriserolloutsfrom
+stalledpilots
+6. ExecuteacleanoperationalhandofffromtheBuildteamtotheteamsthatwillsustainthesystem
+throughitsproductionlife
+24.4 From Pipeline to Production: What This Chapter Inherits
+This chapter is the final stage of the Build sequence. By the time a system arrives here, the previous
+chaptershavedesigned,secured,evaluated,andautomatedit.
+Chapter17supplied the lifecycle framework and the production readiness checklist that defines what
+“ready for production” means. Chapter 21 supplied the security and compliance posture, with docu-
+mented controls and evidence that regulatory requirements are met. Chapter 22 produced the eval-
+uation suite and the acceptance criteria behind the rollout-or-block decision. Chapter23built the au-
+tomatedpipelinethatvalidates, packages, andpromotesartifactswithoutmanualinterventionanden-
+forcesthosecriteriaasgates(Satoetal.,2019).
+Deployment uses these outputs directly. The production readiness checklist is the gate, the CI/CD
+pipeline is the mechanism, and the evaluation results decide whether promotion proceeds or stops.
+Thischapteraddstherest: thestrategyforhowthesystemreachesusers,theinfrastructurethatservesit
+atscale,theresiliencepatternsthatkeepitrunningwhenpartsofitfail,theorganizationalworkthatgets
+userstoadoptit,andthehandoffthattransfersongoingaccountabilitycleanly.
+24.4.1 The Pre-Deployment Gate
+Beforeanyproductiontraffictouchesanewmodelversion,fourconditionsmustholdwithoutexception.
+Production readiness signed off. The checklist from Chapter17is complete, and every item has an
+owner,ananswer,andsupportingevidence(Brecketal.,2017). Oneincompleteitemblockstherelease.
+Signingoffistheteam’sstatementthatthesystemisready.
+Rollback tested and timed. Theteamhasruntherollbackprocedureinthestagingenvironmentand
+recordedhowlongittook. Arollbackthattakesmorethan15minutesputsthesystematelevatedrisk,
+andthedeploymentstrategyshouldaccountforthat. Arollbackprocedurenobodyhasrunisanunveri-
+fiedplan.
+Runbook reviewed with on-call. Everypersonwhomightrespondtoaproductionincidenthasread
+therunbookandcanexecuteitwithoutaskingforclarification. Theaudienceiswhoevergetspagedat3
+a.m. withnopriorcontext. Thepersonwhobuiltthesystemdoesn’tneedit.
+Build: 2026-11-0509:52 548
+
+<!-- page 3 -->
+Stakeholder communication ready. Whogetsnotifiedwhenthisdeploymentgoeslive,andwhatdo
+theyneedtoknow? Forhigh-stakessystems(anythingtouchingcorebusinessprocesses),thecommuni-
+cationplanisreviewedandapprovedbeforethefirstdeploymentcommandruns.
+Deployment timing. Deployduringbusinesshours,whenthefullteamcanmonitorandrespond. For
+high-volumesystems,deployduringalow-trafficwindowsothecanaryperiodhasthebestobservability
+conditions. NeverdeployonaFridayorthedaybeforeaholiday. Thatruleispolicy,notpreference: an
+incidentonaFridayafternoon,withreducedresponsecapacityandthinon-callcoverage,costsfarmore
+thanthesameincidentonaMondaymorning.
+24.5 Deployment Strategies: Choosing How to Release
+Thedeploymentstrategydetermineshow,andhowquickly,anewversionofthesystemreachesproduc-
+tion users. Three factors drive the choice: the risk profile of the change, the blast radius if something
+goes wrong, and the organization’s capacity to detect and respond to problems before they become
+incidents.
+24.5.1 Blue/Green Deployment
+Blue/greenkeepstwoidenticalproductionenvironmentsrunningatthesametime. The“blue”environ-
+ment is the current live system and serves all traffic. The “green” environment holds the new version,
+deployedandfullyvalidatedinparallel. Whengreenisready,theloadbalancermovestrafficfromblue
+togreeninstantaneously,withnoperiodofmixedtraffic(Fowler,2010).
+Themainadvantageisrollbackspeed. Ifgreenshowsproblems,trafficrevertstoblueinseconds. Use
+blue/green when rollback speed is a hard requirement, such as a model serving real-time user-facing
+interactions,whereanystretchofdegradedservicehasdirectbusinessconsequences.
+Thecostisthetradeoff. Runningtwoidenticalenvironments,particularlyforGPU-backedLLMendpoints,
+doubles infrastructure spend during the transition window. Keep that window short and schedule the
+cutoverforalow-trafficperiod. Reserveblue/greenforchangeswheretherollbackspeedrequirement
+justifiesthecost.
+AWS implementation. SageMaker supports blue/green deployment natively for real-time inference
+endpoints. Traffic shift policies are configurable: all-at-once for instantaneous cutover, canary for a
+staged partial shift before full cutover, and linear for incremental traffic increases over a defined time
+window. Route53weightedroutingandAWSApplicationLoadBalancersimplementblue/greenatthe
+networklayerforcustom-builtservingstacksoutsideSageMaker.
+24.5.2 Canary Deployment
+Canary releases a new version to a small fraction of traffic, typically 1 to 10 percent, while the existing
+versionservestherest(Sato,2014). Ifthecanaryperformscorrectlyoveradefinedobservationwindow,
+trafficshiftstothenewversioninsteps. Ifthecanarytripsitstriggercriteria,theteamrollsitback,and
+onlyasmallshareofuserseversawit.
+Canaryisthedefaultdeploymentstrategyformostmodelupdatesbecauseitlimitsblastradius: ade-
+fectivenewmodelversionreachesonlythecanaryfractionwhiletheteamdetectsandfixestheproblem.
+Definetherollbacktriggerbeforedeployment,whilenobodyisunderincidentpressure. Agoodtrigger
+namesboththemetricandthethreshold. Forexample: ifthenewmodel’serrorrateexceedsthecurrent
+productionbaselinebymorethan0.5percentagepoints,orifp95latencydegradesbymorethan20per-
+centwithinthefirsttwomonitoringhours, thecanaryrollsbackautomatically, withnohumandecision
+required.
+AWS implementation. SageMakerCanaryandlineartraffic-shiftingpoliciesimplementthisnativelyfor
+managed endpoints. For EKS-based serving, Argo Rollouts provides canary deployments with config-
+Build: 2026-11-0509:52 549
+
+<!-- page 4 -->
+Figure24.1:Thepre-deploymentgaterequiresthatallfourconditionsbemetbeforeanyproductiontraffic
+reachesanewmodelversion.|618Build: 2026-11-0509:52 550
+
+<!-- page 5 -->
+urableanalysisstepsandautomatedrollbackstriggeredbyPrometheusmetricsorCloudWatchalarms.
+Flagger,whichintegrateswithFlux,isanalternativeforGitOpsworkflows.
+24.5.3 Shadow Mode (Traffic Mirroring)
+Shadowmoderunsthenewmodelversionalongsidethecurrentproductionmodel. Thenewversion
+receivesduplicatedproductiontraffic,butitsresponsesneverreachusers. Bothmodelsprocessevery
+request; onlytheproductionmodel’sresponseisserved, andtheshadowmodel’soutputsarelogged
+andcomparedagainstproduction.
+Shadowmodeshowshowthenewmodelwouldbehaveonrealproductiontrafficbeforeanyusersees
+its output. That makes it the lowest-risk validation technique for high-stakes systems such as medical
+decisionsupport,frauddetection,orcreditunderwriting,whereevenashortperiodofdegradedmodel
+qualityisunacceptable. Itslimitationisthatitonlyrevealsdifferencesinoutputdistribution. Itsaysnoth-
+ingaboutlatencyorthroughputunlesstheinfrastructureissizedtohandletheduplicatedload.
+24.5.4 A/B Testing
+A/B testing routes distinct user segments to different model versions and measures outcomes by seg-
+ment. Thoseoutcomesincludebusinessmetricssuchasconversionrate,defaultrate,churnreduction,
+andrevenuepercustomer,inadditiontomodelmetrics. Thatconnectsofflineevaluationtomeasured
+businessvalue.
+UseA/Btestingwhenthebusinesswantsevidencethatanewmodeldeliversbetteroutcomesbefore
+committing to it fully. Testing AI models this way takes more statistical rigor than testing UI changes.
+Predictionscanbetemporallycorrelatedwithinusers. Networkeffectscancontaminatecontrolgroups
+whenoneuser’sAI-assisteddecisioninfluencesanotheruser’sbehavior. Theexperimentaldesignhasto
+accountfortheseconfounders,ortheresultswillmislead(Kohavietal.,2020).
+24.5.5 Progressive Rollout with Feature Flags
+Featureflagsseparatedeploymentfromrelease. Thenewmodelversionisdeployedacrossallinfrastruc-
+ture,andflagconfigurationinafeatureflagsystemturnsitonforspecificusersegments,geographies,
+oraccounttypes. AWSAppConfigandLaunchDarklyarecommonimplementations.
+Flags are particularly useful for enterprise rollouts that activate geography by geography or segment
+by segment. The bank in this chapter’s opening needed exactly this: deploy the new model to every
+region’sinfrastructure,thenturnitonregionbyregionaseachonecompletestraining,signsoffitslocal
+compliance review, and prepares its support team. Deployment and organizational readiness run on
+separatetracks,andflagconfigurationcoordinatesthemwithoutcodechanges.
+ThedeliverypipelinebuiltinChapter23executeswhicheverstrategyischosenandenforcesitsrollback
+triggersautomatically. Thechoicebelongstotheteamthatownsthechange,andriskshoulddriveit:
+Table24.1: DeploymentStrategySelectionGuide—Scenario,RecommendedStrategy.
+Scenario RecommendedStrategy
+Lowrisk,highconfidence Canary(5%to100%over48hours)
+Highrisk,needinstantrollback Blue/Green
+Veryhighstakes,unknownproductionbehavior Shadowfirst,thenCanary
+Measuringbusinessimpactaftertechnical
+validation
+A/BtestafterShadoworCanary
+Agentwithsignificantbehavioralchange Shadow(mandatory),thenCanary
+Minorpromptwordingchangewithpassing
+regressionsuite
+Canaryatlowpercentage
+Build: 2026-11-0509:52 551
+
+<!-- page 6 -->
+Figure24.2: Deploymentstrategyselectiondependsonbalancingrollbackspeed,blastradius,cost,and
+validationrequirementsforthespecificchange.
+Build: 2026-11-0509:52 552
+
+<!-- page 7 -->
+Foragent-basedsystems,shadowdeploymentisclosetomandatoryforanysignificantchange. Agents
+receivemulti-turnconversations,ambiguousrequests,andadversarialtext,andevaluationsuitesrarely
+coverthoseinputswell. Thelogofwheretheoldandnewversionsdisagreeisthemostusefulthingthe
+shadowperiodproduces.
+24.6 Serving Infrastructure at Scale
+Serving a model to one user is a software problem; serving it to one million users is an infrastructure
+problem. The serving architecture determines whether the system meets its latency, throughput, cost,
+andreliabilityrequirementsunderrealproductionload.
+24.6.1 Synchronous Serving
+Synchronousservingprocessesarequestandreturnsapredictionbeforereleasingtheconnection. Use
+itwhenthepredictionisneededtocompletetheuser’scurrentaction: fraudscoringduringafinancial
+transaction,productrecommendationsduringacheckoutsession,documentclassificationinaninterac-
+tive workflow. Latency requirements are strict. User-facing systems typically target under 100 millisec-
+ondsatthe95thpercentile,whileinternaltoolingandAPIconsumerstolerate200to500milliseconds.
+AWS implementation. SageMaker Real-Time Inference endpoints provide a managed REST or gRPC
+interface with built-in autoscaling, multi-model serving, and A/B traffic splitting. Endpoint autoscaling
+policiesrespondtorequestrates,latency,orGPUutilization. Forcustomservingstacksormodelsthat
+needspecializedframeworks,thepatternisAmazonEKSwithamodelserver(NVIDIATritonInference
+Server for GPU workloads, TorchServe for PyTorch models) behind an Application Load Balancer. API
+GatewaywithAWSLambdahandleslow-volumesynchronousinferencewithlittleoperationaloverhead,
+butathighrequestvolumesitcannotmatchthethroughputorsustainedlatencyofadedicatedmodel
+server.
+24.6.2 Asynchronous Serving
+Asynchronousservingacceptsarequest,queuesit,andwritesthepredictiontostoragewhenprocessing
+finishes.Theclientdoesnotwait.Useitwhenpredictionsareneededbeforeaninteractionbutnotduring
+it: nightly churn scoring across the full customer base, daily credit risk refresh, large-scale document
+processing. Herethroughputandtime-to-completionmattermorethanper-requestlatency,sooptimize
+forcostandvolumeandtreatresponsetimeassecondary.
+AWS implementation. SageMakerBatchTransformprocesseslargedatasetsinmanagedjobsthatscale
+computeresourcesautomatically,whichmakesitthesimplestoptionforperiodiclarge-scaleinference.
+SageMakerAsynchronousInferencehandleslargepayloadsandlong-runningpredictionsusinganSQS
+queueandS3-backedoutput,soapredictioncantakeminutesinsteadofmilliseconds. Forhighlycost-
+sensitivebatchworkloadsthattolerateinterruptionsandcheckpoint-basedrestarts,AWSBatchwithSpot
+instancescutscomputecostssubstantially.
+24.6.3 Streaming Serving
+Streaminginferenceproducespredictionsasevents arrive, withnear-real-timelatencyandcontinuous
+throughput. Use it when predictions must respond to live events and batch latency is unacceptable:
+behavioraltriggersduringacustomersession,dynamicpricingthattracksliveinventory,orfrauddetec-
+tionatpayment-processingscale. Thearchitecturecombinesanevent-streaminglayerforingestion, a
+stream-processinglayerforfeaturecomputation,andalow-latencyservingendpointforinference.
+AWS implementation. AmazonKinesisDataStreamsorAmazonMSK(ManagedStreamingforApache
+Kafka)handleseventingestion. AWSLambdaoranApacheFlinkapplicationonAmazonManagedSer-
+viceforApacheFlinkprocesseseventsandcomputesfeatures. ASageMakerReal-TimeInferenceend-
+point, a Lambda function, or a custom EKS-based serving stack produces a prediction per event. In a
+Build: 2026-11-0509:52 553
+
+<!-- page 8 -->
+well-designedstreamingpipeline,end-to-endlatencyfromeventarrivaltopredictionavailabilityranges
+from50to200milliseconds.
+Figure24.3:Thethreeservingpatterns—synchronous,asynchronous,andstreaming—eachrequiredistinct
+infrastructurearchitecturesoptimizedfortheirlatencyandthroughputcharacteristics.
+24.6.4 LLM and Agent Serving
+Large language models need different infrastructure from classical ML inference. CPU serving is not
+viable for production LLM workloads at any meaningful scale. GPU memory is the main constraint: a
+7-billion-parametermodelatFP16precisionneedsapproximately14GBofGPUmemory(2bytesper
+parameter), and a 70-billion-parameter model needs approximately 140 GB. Instance selection has to
+coverbothmodelweightstorageandKVcachegrowthunderload.
+Dynamic batching. ProcessingmultipleconcurrentrequestsinasingleforwardpassraisesGPUutiliza-
+tionandlowersper-tokencost. Thepriceisqueuinglatency,becauserequestswaitinthebatchwindow
+before processing. Tune the batch window size against your latency SLO. For interactive applications
+withstrictlatencyrequirements,keepbatchwindowsunder20milliseconds. Forback-officeworkloads
+wherethroughputmattersmorethanlatency,largerwindowsimprovecostefficiency.
+Quantization. ReducingmodelprecisionfromFP32toFP16orINT8lowersmemoryrequirementsand
+increasesinferencethroughput,withminimallossofoutputqualityformostenterpriseclassificationand
+generationusecases(Dettmersetal.,2022).AWSInferentia2nativelysupportsFP16andBF16precision;
+NVIDIAA10GandA100instancessupportINT8quantizationviaTensorRT.Fewoptimizationspayoffas
+well: quantizationoftenyieldsa2xthroughputimprovementatnear-zeroqualitycost.
+Serving frameworks. vLLM gets substantially higher throughput than naive serving implementations
+throughPagedAttention,whichmanagestheKVcacheasnon-contiguousmemorypagesandsoavoids
+thememoryfragmentationthatwastescapacityinstandardimplementations(Kwonetal., 2023). Hug-
+ging Face’s Text Generation Inference (TGI) provides production-ready LLM serving with tensor paral-
+lelism across multiple GPUs. Amazon Bedrock handles model hosting, scaling, and capacity planning
+entirely. Fororganizationsthatdon’tneedthecontrolofself-managedserving,itremovestheinfrastruc-
+turemanagementlayer.
+Build: 2026-11-0509:52 554
+
+<!-- page 9 -->
+Agent serving. Agentsthatcoordinatemulti-steptasks,callexternaltools,andqueryknowledgebases
+mayrunforsecondstominutesperinvocation.Buildtheservinginfrastructurewithtimeoutsconfigurable
+toagentsessionlength, asynchronouspatternsthatfreeHTTPconnectionsduringlong-runningagent
+steps, and a circuit breaker on every external tool dependency. A failed tool call must not take down
+thewholeagentsession. AWSStepFunctionsoffersamanagedorchestrationlayerforcomplexagent
+workflows,withbuilt-inretrylogic,errorhandling,andstatemanagement,whichcutstheinfrastructure
+neededforreliableagentexecution.
+24.6.5 Serving Optimization
+Fourtechniquesreducecostandimprovelatencyinproductioninference.
+Quantization. Asdescribedabove,reducingmodelprecisionfromFP32toFP16orINT8isusuallythe
+firstoptimizationtoapply. Theperformancegainislarge,andthequalityriskislowformostusecases.
+Validateonyourspecificmodelandtaskbeforedeployingaquantizedmodeltoproduction.
+Model compilation. Compilemodelsforthetargethardware: TensorRTforNVIDIAGPUs,AWSNeuron
+SDKforAWSInferentiaandTrainium,or torch.compile forgeneral-purposeoptimization. Youpaythe
+compilation cost once at deployment and keep the speedup for every prediction after that. Latency
+improvementsof2xto4xareachievableforarchitecturesthatmapwelltothecompilationtarget(NVIDIA
+Corporation,2024).
+Prediction caching. Cache predictions for repeated or near-identical inputs. In RAG systems where
+a small fraction of queries makes up a disproportionate share of traffic, caching can cut LLM API calls
+substantially.Semanticcachinglooksupthecachebyembeddingsimilarityinsteadofexactstringmatch,
+soparaphrasedqueriesbenefittoo. AmazonElastiCachewithvectorsearchsupportssemanticcaching
+inproductiondeployments.
+Request batching. Combinemultipleinferencerequestsintoasingleforwardpass. Throughputgoes
+up,andper-requestlatencygoesupbythebatchaccumulationwindow. Batchingpaysoffmostwhere
+throughputistheprimaryconstraintandamoderatelatencyincreaseof50to100millisecondsisaccept-
+able. Batchsizetuningdependsonhardware,sobenchmarkforyourinstancetypeandmodelarchitec-
+ture.
+24.6.6 Capacity Planning
+Threeprinciplesgovernhowtosizeproductionservinginfrastructure.
+• Size for peak load, not average load. AnAIsystemthatsaturatesatpeakcausescascadingfail-
+uresin every downstreamsystem thatdepends onit. Ifyou plan capacity aroundaveragetraffic,
+performancewilldegradeduringtheperiodsofhighestbusinessvolume.
+• Maintain headroom. Target50to60percentutilizationattheexpectedpeakload. Autoscaling
+takestime; GPUinstancesneedseveralminutestoprovisionandpasshealthchecksbeforethey
+receivetraffic. Headroomabsorbsthespikethatarrivesbeforeautoscalingcatchesup.
+• Load test before launch. Beforedirectinganyproductiontraffictotheservinginfrastructure,con-
+firmitcanhandleatleast2xtheexpectedpeakload. Anendpointthatshowsnosparecapacityin
+loadtestingwillnotsurviveitsfirstrealtrafficspike. UseAmazonCloudWatchloadtestingtoolsor
+ApacheJMeteragainstapre-productionenvironmentwithproduction-equivalentinstancetypes.
+24.7 Scaling AI Workloads: From Pilot to Full Production
+Apilotenvironmentisbuiltforobservabilityandcontrol. Productionneedsscaleandresilience. Moving
+from200 users to 4,000users across18 countries forcesarchitecturaldecisions the pilot neverhad to
+make(Sculleyetal.,2015).
+Build: 2026-11-0509:52 555
+
+<!-- page 10 -->
+Figure24.4:LLMinferenceoptimizationtechniquesofferdifferenttradeoffsbetweenthroughputimprove-
+ment,qualityimpact,andimplementationcomplexity.
+Build: 2026-11-0509:52 556
+
+<!-- page 11 -->
+24.7.1 Vertical and Horizontal Scaling
+Vertical scaling increasesthesizeofindividualcomputeinstances:moreCPUcores,moreGPUmemory,
+a newer GPU generation. It fits when the bottleneck is per-request compute capacity, and one larger
+instance removes it more efficiently than several additional ones. Vertical scaling has hard limits. No
+instancegrowsindefinitely; thelargestGPUinstancesareexpensive, andhigh-memoryGPUinstances
+canbescarceinspecificregions. Useverticalscalingforper-requestperformanceandhorizontalscaling
+foraggregatethroughput.
+Horizontal scaling addsinstancesbehindaloadbalancerandisthestandardpatternforproductionAI
+inference at scale. It only works if serving instances are stateless, meaning any instance can serve any
+request without local state from earlier requests. Model weights load at startup from a shared artifact
+store(AmazonS3). Featuredatacomesfromasharedonlinefeaturestore(AmazonDynamoDB,Amazon
+ElastiCache, or SageMaker Feature Store online store). Request routing must not depend on session
+history.
+Autoscaling works differently in each deployment model. SageMaker Real-Time Inference endpoints
+useApplicationAutoScalingpoliciesbasedonInvocationsPerInstance,modellatency,orcustomCloud-
+Watchmetrics. AmazonEKSclustersusetheKubernetesHorizontalPodAutoscaler(HPA),whichscales
+onCPU,memory,orcustommetricspublishedtotheKubernetesMetricsServer. ForGPU-backedwork-
+loads,KEDA(KubernetesEvent-DrivenAutoscaling)canscaleonqueuedepth,whichforinferencework-
+loadsoftenpredictsactualloadbetterthanCPUutilizationdoes.
+Figure24.5:Horizontalscalingrequiresstatelessservinginstanceswithsharedartifactstorageandaccess
+tofeaturedata,enablinganyinstancetoserveanyrequest.
+Build: 2026-11-0509:52 557
+
+<!-- page 12 -->
+24.7.2 Multi-Region Deployment
+Global enterprise AI systems need multi-region deployment for three reasons that have no technical
+workaround.
+Latency. Round-trip network latency between a user in Singapore and a model endpoint in us-east-
+1 can exceed 200 milliseconds before the model processes a single token. That is unacceptable for
+synchronous user-facing predictions. Serving from the nearest geographic region keeps synchronous
+inferencelatencywithintarget.
+Resilience. AnAWSRegionaldisruptionshouldnotcauseaglobalserviceoutage. Multi-regiondeploy-
+mentisolatesfaults: whenoneregionhasaninfrastructurefailure, trafficfailsovertoahealthyone. A
+single-regiondeploymenthasasingle-regionblastradius.
+Regulatory compliance. DataresidencyregulationsintheEU(GDPR),Germany(BDSG),Japan(APPI),
+and other jurisdictions require personal data to be processed and stored within defined geographic
+boundaries(EuropeanParliamentandCounciloftheEuropeanUnion,2016). Sendingcustomerdatato
+amodelendpointoutsideapermittedjurisdictionmaybeacomplianceviolation,howeveraccuratethe
+modelis.
+Active-active routestraffictoallregionsatoncebygeographicproximity,withRoute53latency-based
+routing sending each request to the nearest healthy endpoint. It maximizes availability and minimizes
+latency,butmodelartifacts,featuredata,andconfigurationmuststaysynchronizedacrosseveryregion
+atalltimes. Active-activeissignificantlymorecomplextooperate.
+Active-passive keepsaprimaryregionthathandlesalltrafficandastandbyregionthatactivateswhen
+theprimaryfails. Failoverneedsadocumented,testedprocedurewithadefinedRTO.Active-passiveis
+simplerandcheapertorun, butthefailoverpathneedscarefulengineeringsothepassiveregioncan
+takeloadthemomentitactivates,withoutacold-startthroughputgap.
+24.7.3 Scaling Feature Pipelines
+Servingcapacitydoesnogoodifthefeaturepipelinecan’tkeepup. Featurecomputationhastoscale
+withinferencevolume;ifitdoesn’t,itbecomesthebottlenecknomatterhowmuchservingcapacitysits
+behindit.
+Batchfeaturepipelinesneeddistributedcomputethatgrowswithdatavolume. AWSGlueandAmazon
+EMRwithApacheSparkhandlepetabyte-scalebatchfeaturecomputation. ResultsgototheSageMaker
+FeatureStoreofflinestore(S3)andaresynchronizedtotheonlinestore(DynamoDBorElastiCache)for
+low-latencylookupatinferencetime.
+Streaming feature pipelines need partition capacity that matches inference throughput. Amazon MSK
+ServerlessscalesKafkapartitioncapacityautomatically,withnomanualpartitionmanagement. Feature
+computationonAmazonManagedServiceforApacheFlinkorAWSLambdascaleshorizontallyasevent
+volumerises.
+The synchronization window between offline and online stores should match how time-sensitive each
+featureis. Afeaturethatsummarizesacustomer’spurchasebehavioroverthelast30dayscantolerate
+a1-hoursynchronizationlag. Acountoffailedpaymentattemptsinthelast5minutescannot. Design
+synchronization feature by feature according to that sensitivity, instead of applying one default policy
+everywhere.
+24.7.4 LLM-Specific Scaling
+LLMinferenceislimitedbyacceleratorcomputeandmemory: processingthepromptiscompute-heavy,
+andgeneratingtokensislimitedbymemorybandwidthandKV-cachesize. Scalingaself-hostedmodel
+meansaddingGPUoracceleratorcapacity,whichisexpensiveandsometimesscarceinspecificregions.
+Build: 2026-11-0509:52 558
+
+<!-- page 13 -->
+Figure24.6: Active-activedeploymentminimizeslatencyandmaximizesavailability; active-passivesim-
+plifiesoperationsbutrequiresatestedfailoverprocedure.
+Build: 2026-11-0509:52 559
+
+<!-- page 14 -->
+ScalingonamanagedservicesuchasAmazonBedrockmeansworkingwithinquotasandbuyingpro-
+visionedthroughput. Eitherway,thecheapestrequestistheoneyoudon’tsendtoyourlargestmodel.
+ThreetechniqueslowerthecostofscalingLLMworkloadswithlittleornolossofquality,aslongasyou
+tuneandmonitorthem.
+Tiered serving. Route each request to a model sized for its complexity. A routing layer sends sim-
+ple queries, such as factual lookups, short classification tasks, and templated generation, to a smaller,
+cheapermodelandsavesthelargermodelforrequeststhatneeditsextracapability. AmazonBedrock
+IntelligentPromptRoutingdoesthisautomaticallybetweenmodelsinthesamefamily. LangChain’srout-
+ingprimitivesandgatewayssuchasLiteLLMletyoubuildroutersacrossproviders. Evaluateroutingon
+arepresentativetestset,becauseamisroutedcomplexquerycostsyouquality,notjustmoney.
+Prompt caching. Many requests share a long, identical prefix: a system prompt, tool definitions, or
+afixedblockofretrievedcontext. Promptcaching(alsocalledprefixcaching)letsthemodelreuseits
+internalstateforthatprefixinsteadofrecomputingit,whichcutsinput-tokencostandtimetofirsttoken.
+AmazonBedrockandthemajormodelprovidersofferitasafeature,andvLLMdoesitautomaticallyfor
+self-hostedmodels. Becausethemodelstillgeneratesafreshanswer,promptcachingdoesnotchange
+theoutput. Tobenefit,putthestablecontentatthestartofthepromptandthevariablecontentatthe
+end.
+Semantic caching. CacheLLMresponsesbythesemanticsimilarityofrequestsinsteadofanexactstring
+match. Whenanewqueryiscloseenoughtoonealreadyanswered,returnthestoredresponsewithout
+callingthemodel. AmazonElastiCacheforValkey(version8.2andlater)supportsthevectorsearchthis
+requires, and libraries such as RedisVL provide semantic caching out of the box. At high volume, se-
+manticcachinglowersbothcostandlatencyforthecachedshareoftraffic. Itneedscarefultuning: set
+thesimilaritythresholdhighenoughtoavoidreturninganswerstoquestionsthatonlylookalike,expire
+entrieswithaTTL,anddon’tcachepersonalizedortime-sensitiveresponses.
+Committed Capacity and Spot. Forpredictableinferenceworkloads,commitment-basedpricinglowers
+thecostofthebaseline. SageMakerAISavingsPlansreduceSageMakerinstancecosts,includingreal-
+time endpoints and Batch Transform, by up to 64 percent in exchange for a one- or three-year hourly
+spend commitment (Amazon Web Services, 2025a). The maximum discount requires a three-year, all-
+upfrontterm,andunusedcommitmentisstillbilled,socommitonlytothesteadyfloorofusageleftafter
+right-sizing. SavingsPlansareabillingdiscount, notacapacityguarantee. WhereGPUsupplyistight,
+reserve the hardware itself with EC2 On-Demand Capacity Reservations or Capacity Blocks for ML, or
+buyProvisionedThroughputformodelsservedthroughAmazonBedrock. Forbatchinferencethatcan
+checkpointandrestart,EC2Spotinstances,useddirectlyorthroughEKSorAWSBatch,cutcostsfurther.
+Beyond these four, the serving layer offers further gains for self-hosted models: continuous batching
+(vLLM,TGI),quantization,andspeculativedecodingraisethenumberoftokenseachGPUcanproduce.
+AutoscaleonLLM-specificsignalssuchasqueuedepth,tokenspersecond,ortimetofirsttokenrather
+thanCPUuse. Forworkthatcanwait,batchinferenceAPIsprocessrequestsatalowerprice.
+24.8 Resilience Design Before Go-Live
+AdeployedAIsystemneedsadefinedbehaviorforwhenthingsgowrong,andtheteamhastodesign
+thatbehaviorbeforelaunch. Chapter28covershowtorunasystemreliably: errorbudgetpolicy,chaos
+engineering,incidentresponse,andrunbooks.Thissectioncoversthefivedecisionstheteammustmake,
+document,andtestbeforethefirstproductionrequest.
+1. Commit to service levels. SettheSLA,whichisthecommitmenttousersandstakeholders(forex-
+ample,99.9percentavailabilitywithp95latencyunder500milliseconds),andastricterinternalSLOthat
+givestheteamanoperatingbuffer. Thegapbetweenthetwoistheerrorbudget,theallowableunreli-
+abilitythatproductandengineeringshare(BetsyBeyer, ChrisJones, JenniferPetoff, andNiallRichard
+Murphy,2016). Chapter28extendsthesetargetstomodelqualityandshowshowtospendthebudget.
+Build: 2026-11-0509:52 560
+
+<!-- page 15 -->
+2. Design the degradation chain. WhentheAIsystemisunavailable,thebusinessprocessshouldkeep
+runningatreducedcapability. Forachurnscoringsystem: ifthescoringendpointisunreachable,serve
+the most recent cached scores; if cached scores are more than 24 hours old, apply a rules-based risk
+heuristic; if no attributes are available, route the customer to a human review queue. Write the chain
+beforedeployment,validateitinstaging,anddocumentitintherunbook. Teamswithnopre-designed
+fallbackeitherimprovisebadlyunderincidentpressureorletthebusinessprocessfailoutright.
+3. Put circuit breakers on every external dependency. Acircuitbreakerstopssendingrequeststoa
+degradeddownstreamservicebeforethatservice’sbacked-upqueuedragstheupstreamsystemdown
+too. Ithasthreestates: closed(requestspass),open(thefallbackisservedimmediately),andhalf-open
+(a few probe requests test recovery). AI systems need one on each LLM API dependency, each agent
+tool call, and each online feature store query. A slow dependency then produces a cached or default
+responseinsteadofacascadeoftimeouts.
+4. Choose the redundancy level. The baseline is multiple serving instances behind a load balancer,
+spreadacrossatleasttwoAvailabilityZones. Addactive-activeoractive-passiveregionswhentheSLA
+exceeds99.9percentorthebusinesscannotacceptaregionaloutage. Consideralighterbackupmodel
+thatkeepstheprocessrunningduringprimarymodelfailuresorlongretrainingcycles.
+5. Set recovery targets and test the DR runbook. The Recovery Point Objective (RPO) defines ac-
+ceptabledataloss. FormostproductionAIsystems,thetargetiszero,whichmeanslogginginference
+requestsdurablyandcheckpointingpipelinestate. TheRecoveryTimeObjective(RTO)dependsonthe
+system’sbusinessrole: minutesforpaymentfrauddetection,hoursforanightlybatchscoringjobwhose
+outputisduebeforethemorningconsumptionwindow. TheDRrunbookrebuildsthesystemfromin-
+frastructureascode,restoresmodelartifactsandpipelinestate,andvalidatestheresultwithsmoketests.
+Executeitbeforelaunchandatleastquarterlyafterward. Untilithasrun,therunbookisonlydocumen-
+tation.
+24.9 Organizational Readiness and Change Management
+Atechnicallycorrectsystemcanstillfailinproduction. WhenenterpriseAIdeploymentsstallbetween
+pilot and scale, the cause is usually organizational: users who were never trained, ownership that was
+never assigned, feedback mechanisms that don’t exist, and incentives that work against the system’s
+outputs(Singlaetal.,2024). Inthesecases,thetechnicalsystemgenerallyworks. Theorganizationjust
+wasn’treadytouseit.
+24.9.1 Why Pilots Succeed, and Scale Fails
+A pilot runs under conditions that cannot be reproduced at scale. Its users are a selected, engaged
+groupwhowerebriefedonthesystemandwantittowork. Thebuildteamwatchesthemclosely,and
+thecontrolledenvironmentmakesproblemsvisiblerightaway. Scalebringsconditionsthepilotnever
+tested.
+Heterogeneous users. Noteveryloanofficerin18countriesisanearlyadopter,andmanyareskepti-
+calofAIrecommendations. Somehaveincentivesthatcutagainstadoption: ifthemodelrecommends
+approvalstheywouldhaverejected,itimplicitlyquestionstheirjudgment. Trainingandchangemanage-
+mentmustreachthewholepopulation,notjusttheuserswhovolunteeredforthepilot.
+Distributed accountability. Inthepilot,withthebuildteampresent,problemssurfacedwithinhours. At
+scale,theytakedaysorweeks,becauseuserssitindifferenttimezones,havenodirectlinetothebuild
+team,andmaynotevenrecognizeawrongprediction.
+Integration brittleness. The pilot ran in one environment with known data formats. Production inte-
+grateswithdozensofsystems,includingCRMplatforms,loanoriginationsystems,compliancedatabases,
+andregionaldataformats,andeachonehasedgecasesthepilotneverencountered.
+Build: 2026-11-0509:52 561
+
+<!-- page 16 -->
+Figure24.7:Apre-designeddegradationdecisiontreeensuresthebusinessprocesscontinuesatreduced
+capabilityratherthanfailingcompletelywhentheAIsystemisunavailable.
+Build: 2026-11-0509:52 562
+
+<!-- page 17 -->
+Figure 24.8: The circuit breaker pattern prevents cascading failures by detecting downstream service
+degradationandstoppingrequestflowbeforeupstreamsystemsareoverwhelmed.
+Build: 2026-11-0509:52 563
+
+<!-- page 18 -->
+24.9.2 User Adoption Requirements
+Training. Usersneedtounderstandwhatthemodeldoesanddoesnotdo, howitsconfidencevaries
+acrossinputtypes,andwhentotrustoroverrideitsrecommendations. Thegoaliscalibratedtrust. Users
+who accept every recommendation miss the model’s errors, and users who override it by reflex throw
+awayitsvalue. Atrainingcurriculumfortheunderwritingsystemcoverswhatdatathemodeluses,how
+itsaccuracyvariesacrossloantypesandcustomersegments,workedexamplesofcorrectandincorrect
+predictions,theoverrideprotocol,andhowtosubmitfeedback.
+Workflow integration. The AI system has to fit the workflows users already follow. If a loan officer
+mustopenaseparatetool,pasteincustomerdata,andthenre-enterthedecisionintheloanorigination
+system,thatfrictionwillkilladoptionhowevergoodthemodelis. Predictionsshouldappearinsidethe
+toolsusersalreadyworkin.
+Feedback channels. Makereportingproblemseasy. Anin-interfacefeedbackbuttonworksbetterthan
+aJIRAsubmissionprocess. Feedbackdatadoestwojobs: itsupportsusersandlabelscaseswherethe
+model was wrong in ways that matter to a practitioner, which is high-quality signal for improving the
+model.
+24.9.3 Ownership and Support Model
+Assignownershipbeforedeployment;anincidentisabadtimetofindoutnobodyhasit:
+• Product owner. Accountableforbusinessvalueanduserexperience. Thispersonescalateswhen
+thesystemisnotdeliveringexpectedoutcomesandrepresentsuserneedsintheongoingBuild-
+Operaterelationship.
+• ML engineer or data scientist. Accountable for model quality, evaluation, and retraining. This
+person investigates when prediction quality degrades and owns the retraining and re-evaluation
+cycle.
+• Platform or MLOps engineer. Accountableforinfrastructurereliability,deploymentpipelines,and
+servingperformance. Thispersonrespondstoservicefailuresandmanagesthesystem’stechnical
+operationalhealth.
+• On-call rotation. Documentwhorespondsat3a.m. whenthescoringpipelinefails,inwhatorder,
+andwheretheissueescalateswhentheprimaryrespondercannotresolveit. Doadryrunofthe
+escalationpathbeforethefirstproductionincident. Confirmthateveryoneintherotationhasthe
+accesspermissions,tooling,anddocumentationtorespondwithoutfirstcallingsomeoneelsefor
+help.
+24.9.4 Governance at Scale
+Asthesystemreachesmoreusersmakingmoredecisions,governancerequirementsgrowinproportion.
+WewilldiscussAIGovernanceingreaterdetailinChapter25,butfornowhereareafewbasicsrelated
+tomodeldeploymentandscaling:
+Model performance reviews. Technicalandbusinessstakeholdersshouldmeetonarecurringschedule
+toassesswhetherthesystemstilldeliversitsintendedvalue. Frequencydependsondecisionstakesand
+howfasttheunderlyingdomainchanges. Afraudmodelfacingarapidlyevolvingthreatenvironment
+warrants monthly review; a demand forecasting model in a stable product category may only need a
+quarterlyone.
+Adoption monitoring. Trackadoptionbyusersegment,geography,androle. Lowadoptioninaseg-
+mentmeanschangemanagementfellshortthereorthemodel’squalitydoesnotmeetthatsegment’s
+needs. Highadoptioninsegmentswherethemodelislessaccuratepointstoatrustcalibrationproblem.
+Override tracking. HowoftenpeopleoverruletheAItellsyouwhetherthey’reactuallyusingitwell. If
+theyalmostneveroverrideit,theymayberubber-stampingitsoutputinsteadofthinkingforthemselves.
+Build: 2026-11-0509:52 564
+
+<!-- page 19 -->
+If they override it constantly, they’ve likely stopped trusting it. Neither problem shows up in accuracy
+metrics,sotrackoverrideratesbyusersegmentanddecisiontype.
+24.10 The Operational Handoff
+TheBuildteamcannotruneverysystemitcreatesindefinitely. Acleanhandofftoanoperationalteamis
+whatallowsasystemtobesustained,improved,andgovernedforitsfulloperationallife. Anunclearor
+incompletehandoffleavesasystemnobodyowns. Monitoringlapsesandincidentresponseslows,and
+whenthesystemdegrades,nooneisaccountable.
+24.10.1 What the Handoff Transfers
+System documentation. Architecture diagram, data flow diagram, component dependency map,
+infrastructure-as-code(TerraformmodulesorAWSCDKstacks),knownlimitations,andopenissueswith
+theircurrentstatus.
+Model card. Astructuredartifactthatdocumentswhatthemodeldoes,itsperformanceacrossrelevant
+subpopulations,itsknownfailuremodes,itstrainingdataprovenance,anditsevaluationresults. Anyone
+whoneedstounderstandthesystemwithoutaccesstothetrainingcodestartshere. Themodelcardis
+alsothegovernancedocumentbehindthemodelperformancereviewsdescribedabove.
+Runbooks. Step-by-step response procedures for every known failure mode, written for the person
+paged at an inconvenient hour with no prior context. A complete runbook covers how to confirm the
+failurehasactuallyoccurred, thestepstoinvestigateandresolveit, thechecksthatconfirmresolution,
+andtheescalationpathiftherunbookdoesnotresolvetheincident.
+Active monitoring. Alldashboards,alerts,andSLOtrackingmustbeconfigured,active,andunderstood
+by the receiving team before the handoff is complete. A team that inherits a system without working
+monitoringhasnoearlywarningandwilllearnaboutproblemsonlywhenusersreportthem.
+Escalation contacts. A documented list, in priority order, of who to call when the operational team
+cannot resolve an incident on its own, with contact information and hours of availability. Test the list
+beforefinalizingthehandoff: theBuildteamshouldconfirmthateachcontactknowstheirroleandcan
+bereachedthroughthelistedmethod.
+24.10.2 The Handoff Process
+Documentation review. The Build team and the receiving operational team walk through all system
+documentation together in a scheduled session. They answer open questions, and any missing doc-
+umentation gets written before the handoff proceeds. The session often turns up gaps neither team
+expected.
+Shadowed on-call period. Theoperationalteamtakesprimaryon-callresponsibilityforadefinedpe-
+riod,typicallytwotofourweeks,withtheBuildteamavailableforescalation. Theoperationalteamhan-
+dlesrealincidentsduringthisperiod,withBuildteamsupport,andlearnsthesystemunderrealcondi-
+tionsinsteadoffromdocumentationalone. TheBuildteamshouldrecordlessonsfromeachincidentin
+theshadowedperiodandupdatetherunbookstomatch.
+Formal sign-off. Adocumentedtransferofoperationalresponsibility, withexplicitwrittenacceptance
+from the receiving team. After sign-off, the Build team’s responsibilities narrow to model quality and
+retraining,significantarchitecturalchanges,andconsultationduringmajorincidentsbeyondtheopera-
+tionalteam’sexpertise.
+Build: 2026-11-0509:52 565
+
+<!-- page 20 -->
+Figure24.9: Theoperationalhandofffollowsastructuredsequencefromdocumentationreviewthrough
+shadowedon-calltoformalsign-off,ensuringthereceivingteamispreparedtooperateindependently.
+Build: 2026-11-0509:52 566
+
+<!-- page 21 -->
+24.10.3 Ongoing Build-Operate Relationship
+TheBuildteamstaysinvolvedafterhandoff.Itkeepsaccountabilityforthepartsofthesystemitisuniquely
+placed to maintain: retraining and re-evaluation when model quality degrades, architectural changes
+whenscalingorcapabilityrequirementschange,andconsultationwhenanincident’srootcauseliesout-
+sidetheoperationalteam’sdomain.
+Inamonthlyreview,theBuildandOperateteamsgothroughaccumulatedoperationalissuesandbusi-
+ness performance metrics, share feedback data, and plan the improvement backlog. Without that ca-
+dence,theBuildteamlosessightofhowthesystembehavesinproduction,andtheOperateteamloses
+accesstotheexpertiseitneedstoimproveit. Eitherway,thesystemdeliverslessvalueovertime.
+TheoperationalpracticesinPart4arewhatthereceivingteamappliestothesystemthischapterdelivers:
+monitoringandobservability(Chapter27),reliabilityengineering(Chapter28),costmanagement(Chap-
+ter29),governance(Chapter25),andbusinessvaluemeasurement(Chapter30).TheOperatepartstarts
+wherethishandoffends.
+24.11 Real-World Case Study: Lyft’s ML Platform and the Produc-
+tion Readiness Review
+AsLyft’sMLplatformgrewfromasmallnumberofmodelstohundredsinproduction,operationalcom-
+plexityoutpacedwhattheengineeringteamcouldmanagebyhand(Markov&LyftEngineering,2021).
+Modelsreachedproductionwithoutclearlydefinedowners. Incidentresponsetookhoursbecauserun-
+booksweremissingorinconsistent,andperformanceproblemswentuninvestigatedbecausemonitoring
+coveredthefleetunevenly.
+Lyftrespondedbyintroducingaformal Production Readiness Review (PRR),agateeverymodelhad
+topassbeforeenteringproduction. Everymodelteamhadtosupplyfourthings:
+• documentedrunbooksforknownfailuremodes
+• definedSLOswithactivemonitoring
+• anamedon-callownerwhohadconfirmedtherole
+• evidencethatthemodel’sevaluationresultsmettheacceptancecriteriaforproductiontraffic. Mod-
+elsalreadyinproductionthatcouldnotmeettheserequirementswereidentifiedandgivenadead-
+linetocomplyorbedeprecated.
+Theresultsweremeasurable:fasterincidentresolution,fewerrepeatincidentsfromthesamerootcause,
+and closer attention to operational quality across engineering teams. For any enterprise scaling AI, a
+ProductionReadinessReviewseparatesmodelsthataretechnicallycompletefrommodelsthatareoper-
+ationallyready. Withoutthatgate,bothkindsreachproduction,andonlythesecondbelongsthere.
+24.12 Use Case: Retail Customer Acquisition and Retention
+PreviouschaptersinthisseriesbuilttheretailAIsystemthrougheachstageoftheBuildlifecycle. Chap-
+ter 18 established the cloud platform architecture on AWS. Chapter 19 built the feature-engineering
+pipelineonthecustomerbehavioraldataset. Chapter20trainedthechurn-predictionmodelandfine-
+tunedtheoffer-generationLLM.Chapter21establishedthesecuritycontrolsandsign-off. Chapter22
+verifiedthesystemmeetsitsacceptancecriteria. Chapter23automatedthevalidation,packaging,and
+promotionpipeline. Thischapterdeploysit.
+Build: 2026-11-0509:52 567
+
+<!-- page 22 -->
+24.12.1 Deployment Strategy
+Thechurnpredictionmodelrunsasanightlybatchjobthatscores2millioncustomerrecordsandpro-
+duces a ranked churn risk file for the marketing platform to consume each morning. The deployment
+riskismoderate. Adefectivemodelversionwouldproduceincorrectriskscores,andthosescoreswould
+driveincorrectoffertargetinguntilsomeonecaughttheerror.
+Theteamusesacanaryreleaseagainstasampledsubset:
+• Canary at 5 percent of the nightly scoring job, a random stratified sample of 100,000 customers,
+runninginparallelwiththecurrentproductionmodelfor24hours.
+• Rollbacktrigger: churnlabelsarriveweeksafterscoring,soa24-hourcanarycannotmeasureAUC-
+ROConthecustomersitscored. Offlineaccuracywasalreadycheckedbythepipeline’sevaluation
+gate. Thecanarywatcheswhatitcanobservein24hours. Ifthecanary’sscoredistributionshifts
+fromtheproductionmodel’sscoresonthesamesamplebyapopulationstabilityindexabove0.2,
+iffewerthan80percentofthecustomersintheproductionmodel’stop-riskdecilealsoappearin
+thecanary’stopdecile,orifthepipelineerrorrateexceeds0.5percent,thecanaryispulledback
+automatically,andthenextscheduledrunusesthecurrentproductionmodel. The0.2thresholdis
+acommonindustryruleofthumb; itsitsinsidethe0.10to0.25bandthatthepublishedheuristic
+labelsmoderatechange(Yurdakul&Naranjo,2020).
+• Ifthecanarypassesits24-hourmonitoringwindow,thenextnightlyrunsends100percentoftraffic
+tothenewmodelversion.
+• Deploymenttiming: Tuesdaymorning,outsidetheMondaymorningdatarefreshwindow,soafull
+cleandatacyclecompletesbeforethefirstcanaryrun.
+TheoffergenerationLLMendpointusesblue/greendeployment. Itservesreal-timerequestsfromthe
+customermobileapplicationandrenderspersonalizedoffertextduringactivesessions,sotherollback
+requirement is strict: a performance problem with a new LLM version must be resolvable in under 60
+secondswithoutuserimpact.
+24.12.2 Serving Infrastructure
+Batch serving for the churn model. SageMakerBatchTransformrunsthenightlyscoringjobagainst
+the customer feature dataset, read from the SageMaker Feature Store offline store (S3). Instance type:
+ml.m5.4xlarge. Thecomputefleetautoscalesonthenumberofrecordsintheinputmanifest,andthere
+isnoalways-onservingcostbetweennightlyruns. ScoredoutputgoestoanS3prefixthatthemarketing
+platformconsumesdownstream. AWSStepFunctionsorchestratesthepipeline,withaLambda-based
+health-check gate that prevents the scored file from being marked available until the job has finished
+cleanlyandtheoutputpassesvalidationchecks.
+Synchronous serving for the offer generation LLM. ASageMakerReal-TimeInferenceendpointserves
+theoffergenerationmodel,autoscalingfrom2to20ml.g5.2xlargeinstancesonrequestqueuedepth. A
+scale-outcooldownof60secondsandascale-incooldownof5minutespreventthrashingwhentraffic
+varies. The p95 latency target is 800 milliseconds. Semantic prediction caching covers the top 1,000
+mostcommoncombinationsofcustomersegmentandproductcategory,estimatedatapproximately40
+percentofrequestvolumeatsteadystate.
+24.12.3 Scaling Plan
+Build: 2026-11-0509:52 568
+
+<!-- page 23 -->
+Table24.2: ScalingPlan—Stage,Users,Scope,ChurnScoring,OfferGeneration,EstimatedMonthlyIn-
+frastructureCost.
+Stage Users Scope ChurnScoring
+Offer
+Generation
+Estimated
+Monthly
+Infrastructure
+Cost
+Pilot 50users 1region 50K
+records/night,
+ml.m5.xlarge
+singleinstance
+1ml.g5.xlarge
+fixedinstance
+~$1,200
+Regional 500users 3regions 500K
+records/night,
+autoscaling
+Batch
+Transform
+2to8
+ml.g5.2xlarge,
+3AZs,Route
+53latency
+routing
+~$12,000
+Enterprise 4,000users 18countries 2M
+records/night,
+EMRSpark
+withS3A
+connector
+4to20
+ml.g5.2xlarge,
+active-active3
+regions,
+Bedrock
+fallback
+~$45,000
+CostestimatesbasedonAWSSageMakerpricingasof2025(AmazonWebServices,2025a).
+Figure24.10: Scalingfrompilottoenterpriserequirescoordinatedprogressionacrossinfrastructure,or-
+ganizationalreadiness,andgovernancecapabilitiesateachstage.
+Attheenterprisestage,thechurnscoringpipelinemovesfromBatchTransformtoEMRSparktohandle
+the larger data volume and the regional feature computation that an 18-country deployment requires.
+Theoffergenerationendpointaddsathirdactiveregion(us-east-1,eu-west-1,ap-southeast-1)tomeet
+GDPRdataresidencyrequirementsforEUcustomersandtoservetheSoutheastAsianmarketwithac-
+ceptablelatency.
+Build: 2026-11-0509:52 569
+
+<!-- page 24 -->
+24.12.4 Resilience Architecture
+SLA and SLO. The offer generation endpoint carries a 99.9 percent availability SLA (approximately 43
+minutesofallowabledowntimepermonth)withaninternalSLOof99.95percent. Thenightlychurnscor-
+ingpipelinecarriesanRTOof2hours: thescoredfilemustbeavailablebeforethemarketingplatform’s
+7a.m. consumptionwindow.
+Graceful degradation. If the offer generation LLM endpoint is unavailable, the application tier falls
+backtoapre-computedcacheofsegment-leveloffersinElastiCache,whichthebatchpipelinerefreshes
+nightly. IfElastiCacheisalsounavailable,themobileapplicationshowsagenericpromotionalmessage
+withacalltoaction. Theexperiencegetsworse,butthecustomerjourneystillworks.
+Circuit breaker. Acircuitbreakerontheoffergenerationendpointopensafterthreeconsecutivefailures
+withina10-secondwindow,staysopenfor30seconds,andsendsasingletestrequestbeforeclosing.
+This keeps a degraded or recovering LLM endpoint from backing up the mobile application’s request
+queueandcausingapplication-layerfailures.
+Redundancy. TheoffergenerationendpointrunsacrosstwoAvailabilityZonesineachregion. Model
+artifactssitinversionedS3bucketswithcross-regionreplicationtoeveryactiveservingregion. Restoring
+thefullservingstackfromTerraformwiththeDRrunbooktakes22minutes, andtherunbookistested
+quarterly.
+24.12.5 Organizational Readiness
+The500-userregionalrolloutcomeswithastructuredorganizationalreadinessprogram:
+Training. Each user cohort gets a two-hour onboarding module, delivered regionally and in the local
+languagewhererequired. Itcovershowthechurnmodelproducesscores,howconfidencevariesacross
+customersegments,whentoactonahigh-riskscoreandwhentoinvestigatefurther,andthefeedback
+submissionprotocol. A30-minutequarterlyrefreshercoversmodelversionchanges,notablecasesfrom
+thefeedbackdataset,andupdatedaccuracymetrics.
+Feedback mechanism. Eachretentionofferhasanin-appthumbs-up/thumbs-downbuttonwithanop-
+tionalfree-textcomment. FeedbackisaggregatedweeklyinaQuickSightdashboardthattheproduct
+ownerandtheMLteamleadreview. Whennegativefeedbackonanofferexceedsadefinedthreshold,
+thatofferisqueuedformanualreviewasapotentialtrainingdatacandidate.
+Ownership model. Product owner: VP of Customer Retention. ML accountable: lead data scientist,
+ChurnPlatformteam.Platformaccountable:MLOpslead.On-callrotation:MLEngineeringandPlatform
+Engineering,withdocumentedescalationtotheleaddatascientistformodelqualityissuesandtothe
+VPofCustomerRetentionforbusinessimpactissues.
+Executive dashboard. A monthly report to the VP of Customer Retention and the Chief Data Officer
+showschurninterventionratebyregion;theratioofmodel-assistedtomanualretentiondecisions;cost
+perretentionaction;andestimatedannualizedrevenueretainedthroughAI-assistedinterventions,com-
+paredwiththepre-deploymentbaseline.
+24.13 Key Takeaways
+• Production deployment at scale is a fundamentally different problem from pilot deployment. In-
+frastructure,organizational,andgovernancerequirementsthatneverappearinacontrolledpilot
+becomeblockersatenterprisescale.
+• Choosethedeploymentstrategybasedonblastradiusandrollbackspeed. Canaryisthedefault
+formostmodelupdates. Useblue/greenwhenrollbackmustbeinstantaneous,andshadowmode
+whenvalidationmusthavezerouserimpact.
+Build: 2026-11-0509:52 570
+
+<!-- page 25 -->
+• Servingarchitecturemustmatchtheusecase: synchronousforreal-time,user-facingpredictions;
+asynchronous batch for high-volume periodic scoring; and streaming for event-driven, near-real-
+timerequirements.
+• Designgracefuldegradationbeforelaunch. Writethefallbackdecisiontreeatsystemdesigntime
+andtestitinstaging,sonobodyhastodecideonafallbackinthemiddleofanincident.
+• Enterprisesystemswithglobalusersordataresidencyrequirementsneedmulti-regiondeployment
+builtintothearchitecturefromdayone.
+• The most common pilot-to-scale failures are organizational: users who were never trained, own-
+ership nobody claimed, feedback channels that don’t exist, and incentives that pull against the
+system’soutputs.
+• Thesustained,reliableoperationdescribedinPart4dependsonacleanoperationalhandoff,with
+completerunbooks,activemonitoring,shadowedon-call,andformalsign-off.
+24.14 Apply It
+1. Deployment Plan. Writeaproductiondeploymentplanfortheretailchurnmodel. Specifythede-
+ploymentstrategyandtherationaleforchoosingit;therollbacktriggercriteria(metricnameand
+numericthreshold);themonitoringwindowdurationandwhatyouarewatching;thestakeholder
+notificationlistandwhateachstakeholderneedstoknow;andthepost-deploymentreviewsched-
+ule. Writeitasanoperationaldocumentthatateammatewhowasnotinvolvedinthisprojectcould
+execute.
+2. Serving Architecture Design. Designtheservinginfrastructurefortheretail-offer-generationLLM
+atthreescales: 1,000requestsperday(pilot),100,000requestsperday(regionalproduction),and
+5,000,000requestsperday(enterprise). Foreachscale,specifytheAWSserviceselectionandra-
+tionale,instancetypeandcount,autoscalingpolicy(metric,scale-outthreshold,scale-inthreshold),
+estimatedmonthlycost, andthesinglemostimportanttradeoffyoumadeforthatscale. Present
+yourdesignasatablewithashortrationaleforeachrow.
+3. Resilience Architecture. Definethecompleteresiliencearchitectureforthechurn-scoringpipeline
+andtheoffer-generationendpoint. Foreach, specify: SLApercentageandwhatitmeansinmin-
+utespermonth,SLOpercentage,errorbudgetinminutespermonth,gracefuldegradationfallback
+chain(atleasttwolevels),circuitbreakerconfiguration(failurethreshold,openduration,probebe-
+havior), and a five-step DR runbook outline. Identify the single most likely failure mode for each
+systemandexplainyourreasoning.
+4. Organizational Readiness Plan. Definetheorganizationalreadinessplanforrollingouttheretail
+churnandoffersystemto500usersinfiveregions. Include: thetrainingapproachandestimated
+timeinvestmentperuser;achangemanagementstrategyforuserswhoareskepticaloforresistant
+toAIrecommendations;theownershipmodelwithnamedroletypesandtheirspecificaccountabil-
+ities;thefeedbackmechanismdesign;andtheexecutivecommunicationcadence,includingwhich
+metricsappearateachreportinglevel.
+5. Operational Handoff Package. Define the complete operational handoff package for the retail
+churnmodel. Listeverydocument,artifact,andactivityrequiredforacleantransferofoperational
+responsibility. Identifythethreeitemsmostlikelytobeincompleteatthetimeofthehandoff,ex-
+plainwhyeachiscommonlyskipped,anddescribewhatyouwoulddotomakesureeachiscom-
+pletedbeforeformalsign-off.
+6. AI Prompt. Usethispromptwithanyfrontiermodeltosurfacesystem-specificdeploymentrisks:
+“YouareanMLplatformengineerplanningtheenterprise-scaledeploymentofaretailAIsystemfrom
+a50-userpilotto5,000usersacross12countries. Thesystemincludesanightlybatchchurn-scoring
+pipelinethatprocesses2millioncustomerrecordsandareal-timeLLMoffer-generationendpoint
+serving a mobile application. Identify the five highest-risk failure points in the scale-up, whether
+Build: 2026-11-0509:52 571
+
+<!-- page 26 -->
+technicalororganizational,andrecommendspecificmitigationsforeach. Formatyourresponseas
+ariskregisterwithcolumns: riskname,category(technicalororganizational),likelihood(high/medi-
+um/low),businessimpact,andmitigationaction.”
+24.15 What’s Next
+ThatcompletestheBuildsection. Acrosseightchapters,theretailAIsystemhasgonefromthelifecycle
+frameworkthroughcloudarchitecture,dataandfeatureengineering,modeldevelopment,securityand
+compliance,testingandevaluation,XOpsandcontinuousdelivery,andnowproductiondeploymentat
+enterprisescale. Thesystemislive,servingusers,andhandedofftooperations.
+Part4,Operate,openswiththeaccountabilitythatkeepseverythinginthischaptersustainableovertime.
+Chapter25establisheswhodecideswhataboutaproductionAIsystem: risktiers,decisionrights,theAI
+systeminventory,andtheoversightbodiesthatapprovethresholdsandchanges.Thosedecisionsshape
+the rest of Part 4, from the guardrails in Chapter 26 to the monitoring in Chapter 27 and the incident
+responseinChapter28. Part4beginsthere.
+24.16 References
+AmazonWebServices. (2025). AmazonSageMakerPricing. https://aws.amazon.com/sagemaker/prici
+ng/.
+BetsyBeyer,ChrisJones,JenniferPetoff,andNiallRichardMurphy. (2016). SiteReliabilityEngineering:
+HowGoogleRunsProductionSystems. O’ReillyMedia.
+Breck,E.,Cai,S.,Nielsen,E.,Salib,M.,&Sculley,D.(2017).TheMLTestScore:ARubricforMLProduction
+ReadinessandTechnicalDebtReduction.2017IEEEInternationalConferenceonBigData(BigData),
+1123–1132.
+Dettmers, T., Lewis, M., Belkada, Y., &Zettlemoyer, L.(2022). LLM.Int8(): 8-bitMatrixMultiplicationfor
+Transformers at Scale. Advances in Neural Information Processing Systems (NeurIPS 2022). https:
+//doi.org/10.48550/arXiv.2208.07339
+EuropeanParliamentandCounciloftheEuropeanUnion. (2016). Regulation(EU)2016/679oftheEuro-
+peanParliamentandoftheCouncilof27April2016ontheprotectionofnaturalpersonswithregard
+totheprocessingofpersonaldataandonthefreemovementofsuchdata(GeneralDataProtection
+Regulation). EuropeanUnion.
+Fowler,M.(2010). BlueGreenDeployment. https://martinfowler.com/bliki/BlueGreenDeployment.html.
+Kohavi,R.,Tang,D.,&Xu,Y.(2020).TrustworthyOnlineControlledExperiments: APracticalGuidetoA/B
+Testing. CambridgeUniversityPress.
+Kwon,W.,Li,Z.,Zhuang,S.,Sheng,Y.,Zheng,L.,Yu,C.H.,Gonzalez,J.E.,Zhang,H.,&Stoica,I.(2023).
+EfficientMemoryManagementforLargeLanguageModelServingwithPagedAttention.Proceedings
+ofthe29thSymposiumonOperatingSystemsPrinciples(SOSP’23),611–626. https://doi.org/10.114
+5/3600006.3613165
+Markov, A., & Lyft Engineering. (2021). LyftLearn: ML Model Training Infrastructure Built for Scale and
+Extensibility. https://eng.lyft.com/lyftlearn-ml-model-training-infrastructure-built-for-scale-and-
+extensibility-e2a849a6ef25.
+NVIDIACorporation. (2024). NVIDIATensorRT:High-PerformanceDeepLearningInference. https://de
+Build: 2026-11-0509:52 572
+
+<!-- page 27 -->
+veloper.nvidia.com/tensorrt.
+Sato,D.(2014). CanaryRelease. https://martinfowler.com/bliki/CanaryRelease.html.
+Sato,D.,Wider,A.,&Windheuser,C.(2019).ContinuousDeliveryforMachineLearning.https://martinfo
+wler.com/articles/cd4ml.html.
+Sculley,D.,Holt,G.,Golovin,D.,Davydov,E.,Phillips,T.,Ebner,D.,Chaudhary,V.,Young,M.,Crespo,J.-
+F.,&Dennison,D.(2015). HiddenTechnicalDebtinMachineLearningSystems. AdvancesinNeural
+InformationProcessingSystems(NeurIPS),28,2503–2511.
+Singla, A., Sukharevsky, A., Yee, L., Chui, M., & Hall, B. (2024). The State of AI in Early 2024: Gen AI
+AdoptionSpikesandStartstoGenerateValue. McKinseyQuantumBlackAI.
+Yurdakul,B.,&Naranjo,J.(2020). Statisticalpropertiesofthepopulationstabilityindex. JournalofRisk
+ModelValidation,14(4),89–100. https://doi.org/10.21314/JRMV.2020.227
+Build: 2026-11-0509:52 573

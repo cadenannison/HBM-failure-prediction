@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Archivo"; font-weight: 800; src: url("node_modules/@fontsource/archivo/files/archivo-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 400; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 600; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+:root { --bg: #F4F6F6; --fg: #152120; --muted: #5A6866; --accent: #0E7A6C; --line: #B9C6C4; --tag: #E2ECEA; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1600px; background: var(--bg); font-family: "Plex", sans-serif; color: var(--fg); }
+#canvas { width: 1600px; padding: 56px 60px 64px; background: var(--bg); }
+h1 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 56px; line-height: 1; letter-spacing: -0.01em; }
+.sub { font-size: 20px; color: var(--muted); margin-top: 12px; }
+.track { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 24px; margin-top: 56px; }
+.track::before { content: ""; position: absolute; left: 30px; right: calc((100% - 144px) / 7 - 30px); top: 29px; height: 3px; background: var(--line); }
+.stage { position: relative; display: flex; flex-direction: column; gap: 14px; }
+.dot {
+  width: 60px; height: 60px; border-radius: 50%; background: var(--accent); color: #fff;
+  font-family: "Archivo", sans-serif; font-weight: 800; font-size: 28px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 8px var(--bg);
+}
+.dot.opt { background: var(--bg); color: var(--accent); border: 3px dashed var(--accent); }
+.stage h2 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 24px; line-height: 1.1; white-space: nowrap; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -4px; }
+.tag { font-size: 14px; font-weight: 600; color: var(--accent); background: var(--tag); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+.tag.opt { background: transparent; border: 1.5px dashed var(--accent); padding: 2px 9px; }
+.stage ul { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.stage li { font-size: 17px; line-height: 1.3; padding-left: 15px; position: relative; }
+.stage li::before { content: ""; position: absolute; left: 0; top: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1>HBM Early Warning</h1>
+  <div class="sub">From team sign-up to final presentation. Tags show what each stage is graded on.</div>
+  <div class="track">
+    <div class="stage"><div class="dot">1</div><h2>Team up</h2><div class="tags"><span class="tag">5 pts</span></div><ul><li>3–4 people</li><li>Sign up on Canvas</li></ul></div>
+    <div class="stage"><div class="dot">2</div><h2>Pick topics</h2><div class="tags"><span class="tag">5 pts</span></div><ul><li>Rank 2–3 topics</li><li>Rank HBM first</li></ul></div>
+    <div class="stage"><div class="dot opt">3</div><h2>Prototype</h2><div class="tags"><span class="tag opt">Optional</span></div><ul><li>Train on the real data</li><li>Compare to the paper</li><li>Numbers for the doc</li></ul></div>
+    <div class="stage"><div class="dot">4</div><h2>Design it</h2><div class="tags"><span class="tag">Depth 40%</span></div><ul><li>Platform</li><li>Data pipeline</li><li>Models + XOps</li><li>Deployment</li></ul></div>
+    <div class="stage"><div class="dot">5</div><h2>Run + justify</h2><div class="tags"><span class="tag">Depth 40%</span></div><ul><li>Monitoring</li><li>Economics</li><li>Governance</li></ul></div>
+    <div class="stage"><div class="dot">6</div><h2>Connect it</h2><div class="tags"><span class="tag">Integration 30%</span><span class="tag">Business 20%</span></div><ul><li>Link all 8 layers</li><li>Exec summary</li><li>Dollar impact</li></ul></div>
+    <div class="stage"><div class="dot">7</div><h2>Present</h2><div class="tags"><span class="tag">Presentation 10%</span></div><ul><li>15-min deck</li><li>Rehearse Q&amp;A</li></ul></div>
+  </div>
+</div>
+<script>document.fonts.ready.then(function(){ document.body.setAttribute('data-ready','1'); });</script>
+</body>
+</html>

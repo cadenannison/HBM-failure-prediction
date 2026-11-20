@@ -1,0 +1,791 @@
+# Ch22-Testing-Evaluation.pdf (extracted text, 24 pages)
+
+<!-- page 1 -->
+Chapter 22
+Testing and Evaluation: Verifying That
+AI Does What It Claims
+22.1 Motivation
+AhealthcareAIcompanybuildsadiagnosticsupportmodel. Itachieves94%accuracyonthetestset,
+an impressive result by any benchmark. They deploy it. Six months later, an audit reveals the model
+performsat94%overallbutat71%forpatientsover75,apopulationthataccountsfor40%oftheclinical
+cases in which the tool is actually used. The aggregate accuracy number was technically correct and
+completelymisleading.
+Nobodylied. Thetestsetwasreal,andthemetricwasstandard,butthefailurewasinwhatwasn’ttested:
+performanceacrossdemographicslices,behavioronedgecases,andalignmentbetweentheevaluation
+metricandtheclinicaloutcomethatactuallymattered.
+TestingAIsystemsisharderthantestingsoftware. Softwareeitherworksoritdoesnot. AIsystemswork
+to a degree, and that degree varies across inputs, populations, conditions, and time. A churn model
+that performs well on recent cohorts may silently degrade on long-tenured customers. A generative
+system that scores well on automated metrics may produce responses that no domain expert would
+accept. An agent that completes benchmark tasks efficiently may fail catastrophically on ambiguous
+real-worldinstructions.
+Theconsequencesofinadequatetestingscalewithsystemcriticality. Inacustomer-facingrecommender,
+apoorlyevaluatedmodelproducesirrelevantoffersanddepressedconversionrates,arecoverablebusi-
+nessproblem. Inaloanoriginationsystem,amodelwithunmeasureddemographicdisparitiescantrig-
+ger regulatory action, class-action litigation, and reputational damage that takes years to repair. In a
+clinicaldecisionsupportsystem,theconsequencescanbeirreversible. Thecostofathoroughevalua-
+tionbeforedeploymentisalwayslessthanthecostofconsequencesafterit.
+Evaluation is the discipline that determines whether the system is trustworthy enough to deploy at all,
+morethanafinalstepbeforedeployment. Donewell,ittransformsdeploymentfromanactofoptimism
+intoanevidence-baseddecision. Donepoorly,itprovidesfalseconfidencethatismoredangerousthan
+noevaluationatall.
+22.2 Challenge
+Howdoyoudesignandexecuteatestingandevaluationstrategythatgivesyoujustifiedconfidencethat
+anAIsystem, whetheritusespredictivemodels, generativeAI,oragents, isaccurate, fair, robust, and
+readyforproductionbeforeanyuserdependsonit?
+490
+
+<!-- page 2 -->
+22.3 Objectives
+Bytheendofthischapter,youwillbeableto:
+1. Designamulti-layertestingstrategythatcoverscode,data,models,andsystembehavior
+2. Defineevaluationframeworksappropriateforpredictivemodels,generativeAI,andagentsystems
+3. Applyslice-basedevaluationtodetectperformancedisparitiesacrosssubpopulations
+4. EvaluateAIsystemsforfairness,robustness,andsafetybeyondaggregateaccuracymetrics
+5. Designofflineevaluationprocessesandonlineexperimentsforvalidatingbusinessimpact
+6. ApplyAWS-nativetestingandevaluationservicesacrossthefullevaluationlifecycle
+7. Establishproductionreadinesscriteriathatserveasthedeploymentgate
+22.4 What This Chapter Consumes
+TestingandevaluationsitdownstreamofeverythingbuiltinParts2and3,formingavalidationlayerthat
+drawsonspecificartifactsfromseveralupstreamchapters.
+From Chapter 11 (AI Product Definition): TheAI-PRD’straceabilitytableistheevaluationspecification.
+Every requirement maps to a test, and every guardrail maps to a behavioral check. The performance
+thresholdsdefinedintheAI-PRDarethepass/failcriteriaformodelevaluation. Thefailure-moderegistry
+seedsthebehavioraltest-caselibrary. Iftherequirementsaredefinedclearly,theevaluationisstraight-
+forward. Iftheywereleftvague,theevaluationwouldimmediatelyexposethatdebt.
+From Chapter 20 (Model Development): Theexperimentlogfrommodeldevelopmentprovidesthe
+baseline metrics that testing must match or exceed. A model promoted to evaluation without a clear
+performancebaselinefromtrainingwillfailthechampion-challengercomparisonforthewrongreasons.
+Thetrainedmodelartifacts,includingweights,inferencecode,andservingconfiguration,aretheprimary
+inputstoLayers3,4,and5ofthetestinghierarchy.
+From Chapter 21 (Security, Privacy and Compliance): Red team findings from the security chapter
+are not just security artifacts; they become test cases in the behavioral and safety testing layer. Every
+attackvectoridentifiedinthethreatmodelshouldhaveacorrespondingtestcasethatverifiesthesystem
+handlesitcorrectly.Thesecuritysign-offrequiredfortheproductionreadinesschecklistcannotbeissued
+untilbehavioralandsafetytestingiscomplete.
+Together, these inputs mean that when testing begins, the team should already have: a documented
+requirementsetwithdefinedthresholds,abaselineexperimentlog,andasecuritythreatmodelwithred
+teamfindings. Ifanyofthesearemissing,testingwillbeincomplete,andthegapwillsurfaceasafailed
+checklistitemduringtheproductionreadinessreview.
+What this chapter hands forward. Thischapterdefineswhat“goodenoughtoship”means: thetest
+suites,evaluationthresholds,andreadinesscriteria. Chapter23thenencodesthosedefinitionsasauto-
+matedgatesintheCI/CDpipeline,sounittests,integrationtests,andregressionsuitesrunoneverycom-
+mit,andamodelthatfailsevaluationcannotbepromoted. Theordermatters. Agatehastobedefined
+beforeitcanbeautomated; apipelinebuiltbeforethecriteriaexistwillautomatewhateverthresholds
+someoneguessedat.
+22.5 The Testing Hierarchy for AI Systems
+AI systems require testing at multiple layers. Each layer catches distinct failure modes; no single layer
+is sufficient on its own. The six-layer hierarchy described below applies to all AI system types, though
+Build: 2026-11-0509:52 491
+
+<!-- page 3 -->
+thespecifictests,tools,andpass/failcriteriadifferacrosspredictiveML,generativeAI,andagent-based
+systems.
+Build: 2026-11-0509:52 492
+
+<!-- page 4 -->
+###
+Build: 2026-11-0509:52 493
+
+<!-- page 5 -->
+Layer1: UnitTesting
+Test individual functions in isolation: data transformations, feature computations, preprocessing steps,
+andutilityfunctions. Unittestsarefast,deterministic,andmustrunoneverycommit. Afailingunittestis
+thecheapestpossiblefailure,discoveredbeforeanythingelseruns.
+AI-specificunittestsgobeyondstandardsoftwaretesting. ForapredictiveMLsystem,unittestscover
+feature computation logic (does recency calculation use the correct reference date?), data validation
+functions (does the schema validator reject a record missing required fields?), and output formatting.
+ForagenerativeAIsystem,unittestscoverprompttemplaterendering(doeseachtemplatepopulateall
+requiredvariables?),outputparsercorrectness(doestheJSONextractorhandlemalformedresponses
+gracefully?), and retrieval query construction. For an agent system, unit tests cover tool argument val-
+idation (does the argument builder produce correctly typed payloads for each tool?), output schema
+parsing,andindividualtoolexecutionlogic.
+AWS tooling: AWSCodeBuildexecutesunittestsuitesoneverypush,producingstructuredtestreports
+directlyintheAWSConsole. AmazonSageMakerPipelinesintegratesunitteststepsaspipelinestages
+thatmustpassbeforeamodeltrainingjobcanstart, creatingahardgatethatpreventsuntestedcode
+fromeverreachingthetrainingenvironment. Tools: pytest,unittest.
+22.5.1 Layer 2: Integration Testing
+Test components working together. Does the data pipeline produce the correct input format for the
+model? Doesthemodelservinglayerhandleedgecasescorrectly? Doestheretrievalcomponentreturn
+resultsintheexpectedschema?
+For predictive ML systems, integration tests confirm that the feature store serves features in the exact
+schemathemodelwastrainedon.Aschemamismatchbetweentrainingandservingisthemostcommon
+sourceofsilentproductionfailuresindeployedMLsystems(Sculleyetal.,2015). Forgenerativesystems,
+integrationtestsconfirmthatretrieval, promptassembly, andgenerationproduceanoutputmatching
+the expected format and that the pipeline handles empty retrieval results without crashing. For agent
+systems,integrationtestsconfirmthatthetoolregistryisreachable,toolresponsesarecorrectlyparsed,
+andtheplannercanexecuteaminimaltaskend-to-end.
+APIcontracttestsverifythattheservinglayerhonorsitsdocumentedinterfaceunderexpectedandedge-
+caseinputs.
+AWS tooling: AmazonSageMakerFeatureStoreprovidesschema-enforcedfeatureservingthatcanbe
+testedagainsttraining-timeschemasinintegrationtests.AWSStepFunctionscanorchestrateend-to-end
+integrationtest workflows thatexercise every component in sequence. Amazon API Gatewaycontract
+tests verify that model endpoints honor their defined schemas under edge inputs. Tools: pytest with
+fixtures,Postman/NewmanforAPItests.
+22.5.2 Layer 3: Model Evaluation
+Evaluate trained model quality on held-out data. Metric selection depends on system type and task.
+Forpredictivemodels: accuracy,AUC-ROC,precision,recall,F1,andRMSE,chosenbasedonthecost
+asymmetry between false positives and false negatives. For generative systems: faithfulness, answer
+relevance, contextprecision, andcontextrecall. Foragents: taskcompletionrate, stepefficiency, and
+toolcallaccuracy.
+Slice-basedevaluationisnon-negotiableatthislayer. Aggregatemetricsmustbebrokendownbysub-
+population, feature value, time period, and demographic group. Regression evaluationcompares the
+newmodelagainstthecurrentproductionchampiononthesameholdoutset. Anewmodelmustnot
+regressoncoremetricsbeyonddefinedtolerance.
+AWS tooling: AmazonSageMakerClarifyautomatesbiasdetectionandslice-basedevaluation,comput-
+ingpre-trainingandpost-trainingbiasmetricsacrossdefinedsensitivegroupswithoutrequiringcustom
+Build: 2026-11-0509:52 494
+
+<!-- page 6 -->
+code. SageMakerMLflowApp tracksevaluationruns, parameters, and metrics in aqueryable registry,
+enablingchampion-challengercomparisonacrossmodelversionswithoutmanualspreadsheetmanage-
+ment. SageMakerModelCardsgeneratestructuredevaluationdocumentationdirectlyfromexperiment
+data,linkingtheevaluationrecordtothemodelregistryentry.
+22.5.3 Layer 4: System Testing
+Testthefulldeployedsystemasauserwouldexperienceit.Functionalcorrectnesscoverswhetherthesys-
+temproducescorrectoutputsforrepresentativeinputs. Performancetestingmeasureslatency,through-
+put, and resource utilization under realistic load. Fault tolerance testing evaluates how the system be-
+haveswhencomponentsfailandwhetheritdegradesgracefully.
+Foragentsystems,systemtestingincludesmulti-steptaskexecutionunderrealistictoolavailabilitycon-
+ditionsandtestsofbehaviorwhendownstreamservicesreturnerrors.
+AWS tooling: AWSDistributedLoadTestingautomatesperformanceandstresstestingatscale,simu-
+latingconcurrentusersagainstdeployedmodelendpoints. AmazonCloudWatchSyntheticsrunscontin-
+uouscanarytestsagainstendpoints,verifyingavailabilityandcorrectnessafterdeployment. AWSFault
+InjectionService(FIS)systematicallyintroducesfailuresintoproduction-likeenvironmentstoverifygrace-
+fuldegradationbehaviorbeforeanyrealuserisexposed.
+22.5.4 Layer 5: Behavioral and Safety Testing
+Evaluatebehaviorsthatmetricsdonotcapture. Doesthesystemrefusecorrectly? Doesitstaywithinits
+intendedscope? Doesithandleadversarialinputssafely? Forgenerativeandagentsystems,thislayer
+includesprompt-injectiontests,scope-boundarytests,andred-teamscenariosfromthesecuritythreat
+model.
+BehavioraltestingusingtheCheckListmethodologyappliessystematiccapabilityteststoverifythatthe
+modelhandleslinguisticvariations,negations,temporalreasoning,andedgecasescorrectly(Ribeiroet
+al.,2020). CheckList’scentralinsightisthattestcasesshouldbedesignedtoprobespecificcapabilities
+ratherthansampledrandomlyfromadistribution. Amodelthatpassesrandomtestsamplingcanstill
+failsystematicallyonnegations,temporalqueries,orinputswithminimalvocabularyvariation.
+AWS tooling: AmazonBedrockGuardrailsprovidesconfigurablesafetycontrolsthatcanbesystemat-
+icallytestedtoverifythatcontentfilters, topicdeniallists, andgroundingcheckstriggerappropriately
+underadversarialinputs. TeamsdeployingfoundationmodelsthroughBedrockcantestguardrailcon-
+figurationsagainstalibraryofadversarialinputsbeforeproductiondeployment. AmazonComprehend
+andAmazonRekognitioncanbeintegratedintocustombehavioraltestpipelinesforcontentclassifica-
+tionandmoderationtesting.
+22.5.5 Layer 6: User Acceptance Testing (UAT)
+Realusersorsubjectmatterexpertsevaluatethesystemagainstrealistictasks. Qualitativefeedbacksur-
+facesfailuremodesthatautomatedtestsmiss. Userswillfindwaystousethesystemthatautomatedtests
+neveranticipated. Preferenceevaluation(“whichresponseisbetter?”) oftenproducesmoreconsistent
+resultsthanabsolutescoringbecauseiteliminatesinter-raterscaledifferences. UATisrequiredbefore
+initialdeploymentandaftermajorcapabilitychangesthataffectuser-facingbehavior.
+Structure matters here. A structured UAT with defined tasks, explicit evaluation criteria, and recorded
+outcomesisanaudit-readyartifact; aninformal“lettheteamtryit”sessionleavesnosuchrecord. For
+high-stakessystems,UATparticipantsshouldincludedomainexpertswhocanidentifysubstantiveerrors
+ratherthanrelyingsolelyonendusersevaluatingtheexperience.
+Build: 2026-11-0509:52 495
+
+<!-- page 7 -->
+22.6 Evaluating Predictive Models
+TherightevaluationapproachforMLmodelsdependsonthetask,thebusinesscontext,andthedistribu-
+tionofoutcomesthatmatter. Gettingthiswrongatthedesignstagemeanstheentireevaluationprocess
+optimizesforthewrongthing.
+22.6.1 Metric Selection: Matching Metrics to Business Outcomes
+Choosemetricsbasedonthecostasymmetrybetweenfalsepositivesandfalsenegatives,notonconven-
+tionorconvenience.Forclassification:accuracy,AUC-ROC,precision,recall,andF1allmeasuredifferent
+aspectsofmodelqualityandareappropriateindifferentcontexts. Achurninterventionprogrampriori-
+tizesprecisioninthetopdecile(howmanyflaggedcustomerswillactuallychurn)overoverallaccuracy,
+becauseinterventionsareexpensiveandtargeted.Afrauddetectionsystemprioritizesrecalloveralmost
+everythingelse,becausethecostofamissedfraudeventfarexceedsthecostofafalsealert. Ranking
+metrics(NDCG,MAP,MRR)applytorecommendationandsearchsystemswhereorderingmattersmore
+thanabsoluteclassification. Regressionmetrics(RMSE,MAE,MAPE)differintheirsensitivitytooutliers;
+RMSEpenalizeslargeerrorsheavily,whichmayormaynotalignwiththebusinessconsequencesoflarge
+errorsinthespecificusecase.
+Themostimportantrule: defineevaluationmetricsbeforetrainingbegins. Metricschosenafterseeing
+resultsarebiasedtowardthemodel’sstrengthsandwillnotreliablypredictproductionbehavior.
+Figure22.1:Metricselectionshouldfollowbusinesscostasymmetryratherthanconvention,withdifferent
+metricsappropriatefordifferentfailurecostprofiles.
+Build: 2026-11-0509:52 496
+
+<!-- page 8 -->
+22.6.2 Why Aggregate Metrics Are Insufficient
+Amodelcanachievehighaggregateaccuracywhileperformingpoorlyonthesubpopulationsthatmatter
+most. Thisisthedefaultoutcomewhenevaluationisnotdesignedtocatchit. Alwaysevaluateonslices:
+demographicgroups,productcategories,timeperiods,geographicregions,andhigh-valueversuslow-
+valuecustomersegments. Reporttheworst-performingsliceastheheadlinenumber,withtheaverage
+ascontext. Theworstsliceoftenreflectsproductionconditionsforspecificusergroups,andthoseare
+preciselythefailuresthatcreatereputationalandregulatoryrisk.
+Whendefiningslices,prioritizebusinessmeaningoverstatisticalconvenience. Theslicethatmattersis
+theonewhereaperformancefailurewillproducevisibleharm,regardlessofhoweasyitistodefine.
+Amazon SageMaker Clarify supports slice-based bias analysis out of the box, computing metrics such
+asDisparateImpact,StatisticalParityDifference,andEqualOpportunityDifferenceacrossuser-defined
+groupswithoutrequiringcustomcode.ForteamsbuildingonAWS,integratingClarifyintotheevaluation
+pipelineisadirectpathtodefensible,documentedsliceevaluation.
+Figure22.2: Aggregatemetricscanconcealcriticalperformancedisparitiesinthesubpopulationswhere
+thesystemismostfrequentlyused.
+22.6.3 Calibration
+Forprobabilisticmodels,calibrationmeasureswhetherpredictedprobabilitiesalignwithobservedfre-
+quencies. Achurnmodelthatoutputs0.85probabilityshouldberightapproximately85%ofthetime
+forthatgroupofcustomers. Poorlycalibratedmodelsproduceunreliableconfidencescores,anddown-
+streambusinessdecisionsbasedonthosescoreswillbesystematicallywrongregardlessofhowhighthe
+model’sAUC-ROCis.
+CalibrationcurvesandExpectedCalibrationError(ECE)quantifycalibrationquality. Post-hoccalibration
+techniques(Plattscalingandisotonicregression)canimprovecalibrationwithoutretraining. Calibration
+Build: 2026-11-0509:52 497
+
+<!-- page 9 -->
+mustbeevaluatedpersubgroupaswellasinaggregate; amodelcanbewell-calibratedoverallwhile
+beingsignificantlymiscalibratedforminoritysegments,exactlywherecalibrationmattersmostforequity.
+22.6.4 Temporal Validation
+Fortime-seriesdata,neveruserandomtrain/testsplits. Randomsplitsallowinformationfromfuturetime
+periods to leak into the training set, producing optimistic evaluation results that do not generalize to
+deployment.Usetemporalsplitsinstead.Walk-forwardvalidationtrainsondatauptotimeT,evaluateson
+T+1,T+2,andsoon,simulatingtheconditionsthemodelwillfaceinproductionwithoutlookaheadbias.
+Evaluatemodeldecayovertime:howmuchdoesperformancedegradeasthegapbetweenthetraining
+cutoffandtheevaluationdateincreases? Thisdirectlyinformsdecisionsaboutretrainingfrequencyin
+theMLOpspipeline.
+Random Split vs. Temporal Split
+WRONG: Random Split CORRECT: Temporal Split
+Train (80%) Test (20%) Train Validate Holdout
+M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10
+Time (M = month) Time (M = month)
+Test months M3 and M7 sit between training months.
+The model learns from M8–M10, then is scored on M3:
+it has already seen the future.
+Test scores look better than production will.
+cutoff cutoff
+Train
+M1–M6
+Validate
+M7–M8
+Holdout
+M9–M10
+Fit on M1–M6, tune on M7–M8, score once on M9–M10.
+Every test month comes after every training month.
+KEY TAKEAWAY Split time-series data by time, not at random.
+Never train on data from after the period you test on.
+Figure22.3: Randomtrain/testsplitscauseinformationleakageintime-seriesdata;temporalsplitssimu-
+laterealdeploymentconditions.
+22.6.5 Champion-Challenger Evaluation
+Newmodelsarealwaysevaluatedagainstthecurrentproductionchampiononthesameholdoutset. De-
+finetheminimumimprovementthresholdrequiredforpromotionbeforerunningthecomparison. Avoid
+deployingmarginalgainsthatincreasedeploymentriskwithoutameaningfulperformancebenefit. Im-
+provements should be statistically significant rather than merely numerically larger. For small holdout
+sets,bootstrapconfidenceintervalsarepreferabletoasymptoticsignificancetests,whichcanbeunreli-
+ableatsmallsamplesizes.
+AmazonSageMakerMLflowApprecordseverytrainingrunwithitsassociatedhyperparameters,datasets,
+andevaluationmetrics. Champion-challengercomparisonbecomesastructuredqueryagainsttheex-
+perimentregistryratherthanamanualside-by-sidecomparisonthatcanbeinfluencedbyrecencybias
+oroptimism. WhenconnectedtotheSageMakerModelRegistry,thecomparisonresultisautomatically
+attachedtothepromotionrequest,creatinganauditablerecordofwhyanewversionwasapproved.
+Build: 2026-11-0509:52 498
+
+<!-- page 10 -->
+Figure22.4: Champion–challenger evaluation process. Theproductionchampionandcandidatechal-
+lenger generate predictions from the same held-out features; true labels are used only for evaluation,
+neverasmodelinputs. PairedcomparisonsquantifytheAUCimprovementanditsuncertaintyusingboot-
+strap confidence intervals. Promotion requires meeting predefined performance, statistical confidence,
+andoperationalcriteria;otherwise,thechampionremainsinproduction. Evaluationresultsandapproval
+decisionsarerecordedthroughMLflowandthemodelregistrytosupportreproducibilityandauditability.
+Build: 2026-11-0509:52 499
+
+<!-- page 11 -->
+22.7 Evaluating Generative AI Systems
+Standard metrics from supervised learning do not transfer directly to generative systems. Evaluation
+requiresalayeredapproachthatcombinesautomatedmetrics,model-basedscoring,andhumanjudg-
+ment.
+22.7.1 Why Standard Metrics Fall Short
+BLEU and ROUGE measure token overlap between a generated output and a reference string. A re-
+sponsecanbefactuallywrongandscorewell;acreative,accurateresponsecanscorepoorlybecauseit
+usesdifferentwordsthanthereference. Non-determinismcompoundstheproblem: thesameprompt
+producesdifferentoutputseachrun,requiringaggregateevaluationacrossmultiplesamples. Whatmat-
+ters in practice is often subjective: helpfulness, clarity, tone, groundedness, and accuracy. These are
+qualitiesthatrequirejudgmentratherthantokencounting.
+22.7.2 The Generative AI Evaluation Stack
+Automated metrics (fast, cheap, necessary but insufficient):
+Faithfulnessmeasureshowaccuratelytheoutputreflectstheretrievedcontext,acriticalmetricforRAG
+systems. Asystemthatgeneratesfluent,confident-soundingresponsesthatcontradictthesourcedocu-
+mentsisworsethanuseless. Answerrelevancemeasureswhethertheresponseaddressesthequestion
+asked. Context precision and recall measure retrieval quality: did the retrieval step surface the right
+documents,anddidthosedocumentscontaintheinformationneededtoanswerthequestion?
+RAGASprovidesareference-freeevaluationframeworkforallfourdimensions,makingitpracticaltorun
+continuousautomatedevaluationongenerativesystemswithoutrequiringground-truthhumanannota-
+tionsforeverytestcase(Esetal., 2024). Automatedtoxicityscreeningandformatcompliancechecks
+roundouttheautomatedlayer.
+AWS tooling for generative evaluation: AmazonBedrockoffersnativemodelevaluationcapabilities,
+includingautomatedevaluationforqualitymetrics(accuracy,robustness,andtoxicity)andhumanevalua-
+tionworkflowsmanagedthroughtheconsole.ForRAG-basedsystemsdeployedonBedrockKnowledge
+Bases,evaluationcantargetfaithfulnessandcontextrecallasnativedimensionswithintheAWSevalua-
+tionframework,reducingtheamountofcustomevaluationinfrastructureteamsmustbuildandmaintain.
+LLM-as-judge evaluation (scalable, requires calibration):
+Use a separate, more capable model to evaluate outputs against defined criteria. Define evaluation
+rubricsexplicitlybeforerunningevaluation: whatdoesascoreof1,3,or5looklikeforeachcriterion?
+Vaguerubricsproduceinconsistentscoresthatarenotusefulfortrackingimprovementsovertime. Crite-
+riatypicallyincludeaccuracy(doesitreflectdocumentedfacts?),helpfulness(doesitaddresstheactual
+userneed?),safety(doesitavoidharm?),andgroundedness(iseveryclaimsupportedbytheretrieved
+context?).
+Calibratethejudgebeforetrustingit: compareitsscoresagainsthumanscoresonarepresentativesam-
+pleof50-100outputs. Ifthejudge’sscorescorrelatepoorlywithhumanscores,eithertherubricisflawed,
+orthejudgemodelisnotwellsuitedtotheevaluationtask. Tools: RAGAS,TruLens,DeepEval,custom
+harnesswithLangSmith.
+Human evaluation (gold standard, expensive):
+Human evaluation is required for high-stakes systems, initial validation of new use cases before auto-
+mated evaluation is established, and whenever LLM-judge calibration is uncertain. Evaluation design
+shoulduserealistictasks, representativedomainexpertsorendusers, andblindcomparisonbetween
+versions.Preferenceevaluation(“whichresponsewouldyousendtoacustomer?”)consistentlyproduces
+morereliableresultsthanabsolutescoringbecauseiteliminatesinter-raterscaledifferences.Samplesize:
+Build: 2026-11-0509:52 500
+
+<!-- page 12 -->
+atleast100-500outputsforinitialvalidation,withstatisticalpowerappropriatetotheeffectsizerequired
+foradeploymentdecision.
+Figure 22.5: Generative AI evaluation requires all three tiers working together; no single tier provides
+sufficientconfidenceforproductiondeployment.
+22.7.3 Evaluation Pipeline Design
+For production generative systems, evaluation must run continuously rather than as a one-time check.
+Maintainafixedregressionevaluationset: acuratedcollectionofpromptswithexpectedbehaviors,ref-
+erence outputs for automated scoring, and behavioral test cases that must always pass. Run the full
+evaluationsetoneverymodelversion,promptchange,orretrievalconfigurationchange.Trackscoredis-
+tributionsovertime;ashiftinthedistributionindicatesbehavioralchange,evenwhenaggregatescores
+remainabovethethreshold.
+Behavioral tests cover scenarios that must always produce specific outputs: correct refusals to out-of-
+scope requests, proper format compliance, and adherence to safety boundaries. These are the high-
+priority regression cases. A generative system that regresses on a safety boundary, even by a small
+amountinautomatedscoring,requiresimmediateinvestigationbeforepromotion.
+22.8 Evaluating Agent Systems
+AgentevaluationisthehardesttestingprobleminAIengineering. Theactionspaceislarge,errorscom-
+poundacrosssteps,andmanyfailuremodesonlyemergeunderproductionconditionsthataredifficult
+toreplicateinatestenvironment.
+Build: 2026-11-0509:52 501
+
+<!-- page 13 -->
+22.8.1 Why Agent Evaluation Is Difficult
+Agentsoperateovervariable-lengthactionsequences. Atestsuitethatvalidateseachtoolindividually
+doesnotcoverthecombinationsandsequencesthatemergeinrealmulti-steptasks. Errorscompound:
+awrongtoolcallinstep2cancausecascadefailuresthroughsteps3through10,producingasystem
+thatfailsbecausethesequencewaspoorlyplannedeventhoughnosinglestepwaswrong. Binarytask-
+levelsuccessmetricsobscurestep-levelfailuresthatdrivecostandreliabilityconcerns. Unlikepredictive
+models, agents interact with external systems; the behavior of those systems during testing must be
+controlledtoensurereproducible,comparabletestresultsacrossversions.
+22.8.2 Agent Evaluation Dimensions
+Task completion rate: Didtheagentsuccessfullycompletetheassignedtask? Definesuccesscriteria
+preciselybeforerunningtheevaluation: “successfullyescalated”meanscorrectrouting,allrequiredin-
+formationcaptured,andtheSLAmet. Evaluateacrossrepresentativetasktypes,notjustaveragecases,
+becauseagentsfrequentlyfailonspecifictaskpatternswhileperformingwelloverall.
+Step efficiency: Howmanystepsdidtheagenttaketocompletethetask? Excessstepsmeanexcess
+costandexcessfailureopportunity. Eachadditionaltoolcallincreaseslatency, increasestheprobabil-
+ity of a downstream tool failure, and increases inference cost. Compare against target step counts for
+representativetasktypesandflagagentsthatconsistentlyover-step.
+Tool call accuracy: Didtheagentcalltherighttool,withtherightarguments,intherightorder? Toolcall
+erroranalysissurfaceswhichtoolsarecalledincorrectlymostoften,andwhatcontextconditionstrigger
+thoseerrors. Ahightool-callerrorrateforaspecifictooltypicallysignalseitherapoorlydesignedtool
+interfaceoragapinthepromptthatleavestheagentuncertainaboutwhentouseit.
+Constraint compliance: Didtheagentrespectitsdefinedboundaries(scoperestrictions,costlimits,and
+human-in-the-loopgates)? Testspecificallyforboundaryviolationsbydesigningtestcasesthatwould
+incentivize the agent to exceed its authority. An agent that correctly handles easy tasks but approves
+unauthorizedactionswhencustomerpressureissimulatedhasaconstraintcompliancefailure.
+Failure mode testing: Whatdoestheagentdowhenatoolreturnsanerrorortimesout? Howdoes
+itbehavewheninstructionsareambiguous? Canitbemanipulatedthroughadversarialinputstotake
+unauthorizedactions?Doesitcorrectlyidentifyandbreakoutofrepetitivefailureloopsratherthancalling
+thesamefailingtoolindefinitely?
+22.8.3 Simulation-Based Testing
+Buildasimulatedenvironmentwithmocktoolsthatreturnrealisticresponsesforeachtestscenario.Mock
+toolresponsesmustcoverthefullrangeofconditionstheagentwillencounter:standardresponses,edge
+cases(recordnotfound,policyambiguous),andfailureconditions(timeout,ratelimitexceeded,partial
+result set). Run the agent against hundreds of simulated scenarios before any live tool calls. Record
+completeactiontracesforeverysimulationrunandanalyzefailurepatterns.
+Agentsthatconsistentlyfailonaspecifictasktypeortoolcombinationsignalagapinpromptdesign,tool
+interfacespecification,ortheunderlyingmodel’splanningcapability. Identifyingthatgapinsimulation
+costsnegligibleresources. Discoveringitinproductionaftertheagenthastaken40stepsonataskit
+wasnevergoingtocompletecorrectlycostsordersofmagnitudemore.
+Forsystemswithmultipleinteractingagents(aplanneragentdelegatingtospecialistagents),simulation
+must cover multi-agent interaction scenarios in addition to single-agent tasks. Test the handoff condi-
+tions: does the downstream agent receive a correctly structured handoff packet? Does it handle mal-
+formedhandoffsgracefully? Doesthesystemasawholeproduceacorrectresultwhenindividualagents
+disagree?
+AWS tooling for agent testing: AmazonBedrockAgentCoreObservabilityrecordsthefullreasoning
+and action trace for each agent invocation, enabling post-hoc analysis of agent behavior during sim-
+Build: 2026-11-0509:52 502
+
+<!-- page 14 -->
+Figure22.6: Agentevaluationrequiresmeasuringfivedistinctdimensions,eachrevealingdifferenttypes
+ofsystemfailures.
+ulation runs. AWS Step Functions can orchestrate complex simulation scenarios where mock services
+replacerealtoolendpoints,enablingreproduciblemulti-stepagentevaluationatscalewithoutincurring
+liveservicecosts. TraceslandinCloudWatchandcanbeexportedtoAmazonS3forqueryingthrough
+AmazonAthena, makingitpracticaltoanalyzepatternsacrosshundredsofsimulationrunsratherthan
+manuallyreviewingindividualtraces.
+22.9 Fairness, Robustness, and Safety Evaluation
+Fairness,robustness,andsafetyevaluationhavemovedfrombestpracticetoregulatoryrequirementfor
+systemsoperatinginregulatedindustriesandhigh-stakesdomains. Buildingthesedimensionsintothe
+standard evaluation process is significantly cheaper than retrofitting them after a regulatory finding or
+incident.
+22.9.1 Fairness Evaluation
+Fairness is a family of criteria that encode different normative choices about what equity means for a
+specificusecase,notasinglemetricthatappliesuniversally.
+Demographic parity requiresthatthemodelproducesimilarpositivepredictionratesacrossprotected
+groups. Itisappropriatewhenthereisnoreasontoexpecttrueoutcomeratestodifferacrossgroups.
+Equal opportunity requiresthatthemodelhavesimilartruepositiveratesacrossgroups.Itisappropriate
+whenoutcomesactuallydifferacrossgroups,andthegoalistoensurethemodel’serrorsaredistributed
+equallyratherthanconcentratedinspecificpopulations.
+Predictive parity requiresthatpredictedprobabilitiesbeequallycalibratedacrossgroups. Itisappro-
+priatewhenconfidencescoresdrivedifferentiatedbusinessdecisions.
+Build: 2026-11-0509:52 503
+
+<!-- page 15 -->
+Thesecriteriaaremathematicallyincompatibleinmostreal-worldsettings;satisfyingonedoesnotimply
+satisfyingtheothers,andinsomesettings,satisfyingtwocriteriasimultaneouslyisprovablyimpossible
+(Birdetal.,2020). Theappropriatefairnesscriterionmustbechosenbasedonthespecificusecaseand
+regulatorycontextbeforeevaluationbegins,ratherthanselectedafterwardbecauseithappenstobethe
+onethemodelsatisfies.
+Tools: AmazonSageMakerClarify(AWS-native;computesbiasmetricspre-andpost-training,including
+DisparateImpactandStatisticalParityDifference),Fairlearn(Microsoft,open-source),IBMAIFairness360,
+Google’sWhat-IfTool.
+Figure22.7: Fairnesscriteriaencodedifferentnormativechoicesaboutequityandareoftenmathemati-
+callyincompatiblewithoneanother.
+22.9.2 Robustness Evaluation
+Distribution shift: Evaluateondatafromdifferenttimeperiods,geographies,orusersegmentsthanthe
+trainingdistribution. Amodeltrainedonsummerpurchasingpatternsmaydegradesignificantlywhen
+appliedtowinterdata. Amodelcalibratedonurbancustomersmayperformpoorlyonruralcustomers.
+Distributionshiftisthemostcommoncauseofsilentmodeldegradationinproduction.
+Input perturbation: Small, semantically equivalent changes to inputs should produce stable, pre-
+dictablechangesinoutputs. Achurnmodelthatflipsitspredictionwhenacustomer’snameischanged
+hasencodedspuriouscorrelationsthatwillproduceunpredictablebehaviorinproduction.
+Edge cases: Deliberatelytestonrareinputsthatarewithinscopebutunderrepresentedintrainingdata.
+Long-tenuredcustomerswithunusualpurchasepatterns,customerswhohavereturnedproductsmore
+thantheyhavepurchased,andcustomerswhoshopexclusivelyinoneproductcategoryrepresentedge
+casesforretailmodelsthatareoftenunderrepresentedintrainingdata.
+Build: 2026-11-0509:52 504
+
+<!-- page 16 -->
+Stress testing: Evaluateat10xand100xexpectedload. Qualityshouldnotdegradeunderscale,but
+forAIsystems,particularlythosewithretrievalcomponents,itsometimesdoes. Indexfreshness,query
+latency,andcachebehaviorallinteractwithoutputqualityunderhighloadinwaysthatdonotmanifest
+atnormalloadlevels.
+22.9.3 Safety Evaluation
+Safetyevaluationfocusesontheworstplausibleoutcomesfromsystemmalfunction.
+Content safety: Doesthesystemproduceharmful,offensive,orinappropriatecontentunderanytested
+condition? Automated screening catches common violations; red team testing finds edge cases that
+automatedtoolsmiss. Forcustomer-facingsystems,thethresholdshouldbe: “WouldIbecomfortable
+ifthisoutputappearedonthefrontpageofanewsarticle?”
+Scope adherence: Does the system stay within its intended use case, regardless of how requests are
+framed? Aretailoffergenerationsystemthatbeginsprovidingfinancialadvicewhenacustomerphrases
+aquestioninacertainwayhasascope-adherencefailure.
+Refusal quality: Whenthesystemshoulddeclinearequest,doesitdosocorrectlyandinahelpfulway?
+Incorrect refusals harm user experience and erode trust. Missing refusals create safety violations and
+regulatoryexposure. Bothdirectionsoferrormustbetested.
+Catastrophic failure modes: For high-stakes systems (medical decision support, financial risk assess-
+ment, HRscreening), explicitlydocument andtest catastrophicfailurescenarios. Thetestsuite should
+includethescenariosthat,iftheyoccurredinproduction,wouldproducethemostseverebusiness,le-
+gal,orhumanconsequences.
+AWS tooling: AmazonBedrockGuardrailsprovidesconfigurable,testablesafetycontrols,includingcon-
+tentfilters,topicdeniallists,andgroundingchecksthatcanbesystematicallyexercisedduringsafetyeval-
+uation. Teamscandefinealibraryofadversarialtestinputs,runthemagainstaGuardrailsconfiguration,
+andconfirmthateachprohibitedcategoryisblockedbeforeanymodelgoeslive.
+22.9.4 Regulatory Documentation Requirements
+For regulated use cases, fairness and safety evaluation must be documented and retained. EU AI Act
+high-risksystemsrequiredocumentedbiastestingbeforedeployment(EuropeanParliamentandCouncil
+oftheEuropeanUnion,2024). Theproductionreadinesschecklistmustincludeadocumentedfairness
+evaluationrecordspecifyingwhatwastested,resultsbydemographicslice,andmitigationsapplied.This
+documentationsatisfiesacompliancerequirementandservesastheaudittrailthatenablesaninformed
+responsewhenaregulatororplaintiffaskswhatwasknownbeforedeployment.
+IntheUnitedStates,theEqualCreditOpportunityActandtheFairHousingActimposesimilardocumen-
+tationrequirementsforAIsystemsusedincreditandlendingdecisions(ConsumerFinancialProtection
+Bureau,2022). FinancialservicesfirmsdeployingAIincreditdecisioningshouldmaintainamodelrisk
+managementframeworkconsistentwithSR11-7guidance(BoardofGovernorsoftheFederalReserve
+System&OfficeoftheComptrolleroftheCurrency,2011)thatexplicitlyincludestheevaluationartifacts
+producedinthischapter.
+22.10 Production Readiness Criteria
+Productionreadinessisagatethatrunsonevidence. Theproductionreadinesschecklistoperationalizes
+thestandardthatasystemmustmeetbeforeanyuserdependsonit(Brecketal.,2017),andeveryitem
+mustbebackedbyevidence. Checkingtheboxmeansdemonstratingtheoutcome,astrongerbarthan
+simplyassertingthattheworkwasdone.
+Build: 2026-11-0509:52 505
+
+<!-- page 17 -->
+22.10.1 Technical Readiness
+□ Allevaluationmetricsexceeddefinedthresholdsontheholdoutset
+□ Noregressionversustheproductionchampionbeyondadefinedtolerance
+□ Slice evaluation completed; worst-performing slice documented and accepted by the product
+owner
+□ Fairnessevaluationcompleted;resultswithinacceptableboundsperdefinedfairnesscriterion
+□ Integrationtestspassinthestagingenvironment
+□ Performancetestspassat2xpeakexpectedload
+□ Securityscancompleted;nocriticalvulnerabilitiesunresolved
+22.10.2 Operational Readiness
+□ Monitoringdashboardsconfiguredandalertingtestedwithsyntheticevents
+□ Runbookwrittenandreviewed;on-callteamcanexecutethetop5failurescenarioswithoutescala-
+tion
+□ Rollbackproceduretestedandconfirmedtoworkinstaging
+□ Datapipelinequalitygatesactiveinproduction
+□ Costmonitoringactive;budgetalertsconfigured
+22.10.3 Governance Readiness
+□ Privacyimpactassessmentcompleteanddocumented
+□ Regulatorycompliancerequirementssatisfiedandevidenced
+□ Model card documented: capabilities, limitations, evaluation results by slice, intended use, and
+knownfailuremodes(Mitchelletal.,2019)
+□ Stakeholdersign-offobtainedfrom: datasciencelead,productowner,legal/compliance,andse-
+curity
+22.10.4 Calibrating the Checklist
+The production readiness checklist in this chapter builds on the ML Test Score framework, which de-
+fines 28 specific tests and monitoring requirements across four categories: features and data, model
+development,infrastructure,andmonitoring(Brecketal.,2017). Theoriginalframeworkwasdeveloped
+fromGoogle’sexperienceacrossawiderangeofproductionMLsystemsandprovidesascoringrubric:
+teams that score below a threshold have significant gaps that pose real production risk. The checklist
+aboveadaptsthisstructuretocovergenerativeAIandagentsystemsalongsidepredictiveML,adding
+governanceitemsthattheoriginalframeworkpredates.
+Teamspreparingforinitialdeploymentshouldmapeverychecklistitemtoaspecificartifactortestresult
+rather than to verbal assurance. The evidence standard matters: a signed production-readiness docu-
+mentcanbereviewedduringaregulatoryauditinawayaninformalteamconsensusneverwill.
+AWS tooling: AmazonSageMakersupportsamodelregistrywithstagetransitions(Pending,Approved,
+Rejected) that can be gated on evaluation thresholds. Approval workflows in SageMaker can require
+humanreviewandsign-offbeforeamodelversionispromotedfromStagingtoProduction,creatingan
+auditable approval trail that satisfies governance requirements without custom tooling. The approval
+record, the attached evaluation report, and the model card are stored together in the registry and ac-
+companythemodelthroughoutitsoperationallife.
+Build: 2026-11-0509:52 506
+
+<!-- page 18 -->
+22.10.5 The Production Readiness Review
+Theproductionreadinesschecklistculminatesinastructuredreviewmeetingwithrepresentativesfrom
+engineering, product, legal, and operations. Every item is reviewed against its evidence. No item is
+waivedwithoutadocumentedrationaleandanidentifiedowneracceptingtheresidualriskinwriting.
+Theoutputofthereviewisasignedproductionreadinessdocumentthatbecomespartofthemodel’sper-
+manentaudittrail. Thisdocumentaccompaniesthemodelthroughoutitsoperationallife: itisupdated
+whenthemodelisretrained,referencedduringincidents,andsubmittedduringregulatoryaudits.
+Thedisciplineofthereviewmattersasmuchasthechecklistitself. Ateamthattreatsthereviewasamere
+formalitytobescheduledbeforealaunchdatehasalreadyfailedthetestitistryingtopass. Thereview
+iseffectiveonlywhenparticipantshavetheauthoritytoblockdeploymentandtheexpectationthatthey
+willuseitwhenevidenceisinsufficient.
+Figure22.8: Theproductionreadinessreviewisagaterequiringevidenceforeverychecklistitembefore
+deploymentauthorization.
+22.11 Real-World Case Study: Google’s Model Cards
+In2019,researchersatGoogleproposedmodelcards: shortdocumentsthataccompanyeverytrained
+model,providingstructuredinformationaboutitsintendeduse,evaluationresultsacrossdemographic
+slices, known limitations, and ethical considerations (Mitchell et al., 2019). The motivation was direct:
+aggregateaccuracymetricsobscuredisparitiesinsubgroupperformance,andtheresearchcommunity
+lackedastandardmechanismforcommunicatingwhatamodelcouldandcouldnotdo.
+The proposal was adopted voluntarily within Google. Within several years, it had become an industry
+standard(Bommasanietal.,2024). HuggingFacemademodelcardsthedefaultartifactforeverymodel
+Build: 2026-11-0509:52 507
+
+<!-- page 19 -->
+on its platform (Hugging Face, n.d.), creating a de facto requirement for anyone publishing a model
+publicly. Enterprise customers began requiring model cards from AI vendors as part of procurement
+processes (National Institute of Standards and Technology, 2023). The EU AI Act, enacted in 2024, in-
+corporated documentation requirements for high-risk AI systems that closely parallel the model card
+structure(EuropeanParliamentandCounciloftheEuropeanUnion,2024).
+Themechanismbehindtheadoptionisinstructive. Amodelcarddoesnotaddtotheinformationateam
+already has; it forces the team to surface information they were not looking for. A team that knows it
+mustwriteamodelcardwillruntheslice-basedevaluationitmightotherwiseskip,documentlimitations
+itwouldotherwiseleaveimplicit,andmakeexplicitthetradeoffsmadeduringdevelopmentratherthan
+leaving them buried in the model artifact without commentary. The artifact creates accountability by
+makingevaluationdecisionsvisible.
+For enterprise AI practitioners, the implication is practical and immediate: produce a model card for
+everysystembeforeitgoestoproduction. Updateiteverytimethemodelisretrained. Treatitasaliving
+documentinthemodelregistry,notasaone-timedeliverable. Thecostisafewhoursofdocumentation
+perreleasecycle. Thebenefitisanaudittrail,aforcingfunctionforrigorousevaluation,acommunication
+artifactforstakeholderswhoneedtounderstandthesystem’slimitations,andatrustsignaltoenterprise
+customers.
+AmazonSageMakerModelCardsextendsthispracticetotheAWSplatform,generatingstructuredmodel
+cardsfromSageMakerexperimentdataandlinkingthemdirectlytothemodelregistryentry.Teamsusing
+SageMakercanautomatethecard-generationstepaspartoftheevaluationpipeline,makingiteffectively
+cost-freetomaintain.
+22.12 Use Case: Retail Customer Acquisition and Retention
+ThroughoutPart3,asingleretailcustomeracquisitionandretentionsystemhasillustratedtheBuildprin-
+ciples in each chapter. That system now reaches its evaluation gate. Three AI components must each
+clearthetestinghierarchybeforeanyofthemgoestoproduction: thechurnpredictionmodel,theoffer
+generationsystem,andtheescalationagent.
+22.12.1 Testing Hierarchy for the Retail System
+Layer 1 (Unit Tests): UnittestsforthechurnmodelcoverRFMfeaturecomputation:Isrecencycalculated
+correctlyusingthecorrectreferencedate? Doesfrequencynormalizationhandlenewcustomers(zero
+purchases) without a division-by-zero error? Do monetary value bins produce expected distributions
+on a sample of 10,000 customers? Unit tests for the offer generation system cover prompt template
+rendering:Doeseachtemplateproducevalidinputsforallthreecustomersegments?Dooutputparsers
+correctlyextractthefourrequiredofferfieldsevenwhenthemodeladdsconversationalframingaround
+thestructuredoutput? Unittestsfortheescalationagentcovertoolargumentconstructionandresponse
+parsingfortheCRM,orderhistory,andpolicyretrievaltools.
+Layer 2 (Integration Tests): Integrationtestsrunthechurnpipelineend-to-endon1,000held-outcus-
+tomer records and verify that feature values, predictions, and confidence scores are within expected
+ranges. Forthegenerativesystem,integrationtestsconfirmthattheretrievalcomponentsurfacesprod-
+uctcatalogrecordsforthecorrectcustomersegmentandthatgeneratedoffersincludeallrequiredfields.
+Fortheescalationagent,integrationtestsconfirmaminimaltwo-steptask: lookuporderhistory,then
+recommendaresolutionactionusingthecorrectpolicydocument.
+All integration tests run in AWS CodeBuild against the staging environment, gated in the SageMaker
+Pipelinebeforeanymodelcanbepromotedtotheevaluationstage.
+Build: 2026-11-0509:52 508
+
+<!-- page 20 -->
+Figure22.9: Theretailsystemcasestudydemonstrateshoweachtestinglayerappliesdifferentlyacross
+predictive,generative,andagentcomponents.
+22.12.2 Evaluating the Churn Model
+TheprimarymetricisAUC-ROC.Thesecondarymetricisprecisionatthetopdecile,becausetheinterven-
+tionprogramtargetsonlythehighest-riskcustomers;precisionatthedecisionboundarymattersmore
+thanaverageperformanceacrossthefullprobabilityrange.
+Slice evaluation coversfourdimensions: customertenure(0-12months, 13-36months, 36+months),
+productcategoryaffinity(apparel,homegoods,electronics),geographicregion(Northeast,Southeast,
+Midwest, West), andpurchasefrequency(1-3purchases, 4-10purchases, 10+purchases). Theaccept-
+ableperformancefloorforeachsliceis0.05AUC-ROCbelowtheaggregatemodelperformance. Any
+slicethatfallsbelowthatfloorisdocumentedandreviewedwiththeproductownerbeforepromotionis
+approved.
+Amazon SageMaker Clarify automatically runs the slice evaluation, computing Disparate Impact and
+Equal Opportunity Difference for each tenure cohort and geographic region. The Clarify report is at-
+tachedtotheSageMakerModelRegistryapprovalrequestasthefairnessevaluationartifact,providing
+theevidencerequiredbythegovernancereadinesschecklistwithoutmanualcomputation.
+Temporal split: trainingdatausesmonths1-21,validationusesmonths22-24,andholdoutusesmonths
+25-27. Calibration is required because churn probability scores feed direct business decisions about
+interventionintensity;apoorlycalibratedmodelthatoverestimateschurnprobabilityforhigh-valuecus-
+tomerswilltriggerunnecessaryinterventionsathighcost. ExpectedCalibrationError(ECE)iscomputed
+foreachtenurecohortandreportedinthemodelcard.
+Champion-challenger comparison runsthenewmodelagainsttheproductionchampiononthemonths
+25-27 holdout set using SageMaker MLflow App to track both runs. Promotion requires a statistically
+significant improvement in AUC-ROC above a defined threshold, with bootstrap confidence intervals
+to account for the holdout set size. The experiment comparison is attached to the SageMaker Model
+Build: 2026-11-0509:52 509
+
+<!-- page 21 -->
+Registry approval request so the reviewer can inspect the evidence without navigating to a separate
+dashboard.
+22.12.3 Evaluating the Offer Generation System
+Automated evaluation usingRAGASrunson200held-outtestcases,measuringfaithfulness(doesthe
+offeraccuratelyreflectcurrentproductcatalogdata?),answerrelevance(doestheofferaddressthecus-
+tomer’sretentiontrigger?),andcontextprecision(didretrievalsurfacetherightproductrecords?). For-
+matcompliancechecksverifythateverygeneratedofferincludesaproductname,price,expirationdate,
+andcall-to-action,thefourfieldsrequiredfordownstreamcampaignexecution.
+LLM-as-judge evaluation scoreseachofferonthreecriteriausingadefined1-5rubric: persuasiveness
+(isitcompellingtothespecificcustomersegment?),accuracy(doesitreflectactualproductavailability
+andcurrentpricing?),andbrandvoicealignment(doesitmatchtheretailer’spublishedtoneguidelines?).
+The judge model is calibrated against 50 human-scored offers before the evaluation run to ensure its
+scorescorrelatewithmarketingteamjudgments.
+Human evaluation bythemarketingteamreviews50generatedoffersbeforelaunch,usingpreference
+evaluation(“whichofferwouldyousendtothiscustomer?”) againstthecurrentmanuallywrittenbaseline.
+Theacceptancethresholdisa65%preferenceforthegeneratedoffer,meaningitmustbepreferredover
+themanualbaselinebythemarketingteamatleast65%ofthetime.
+22.12.4 Evaluating the Escalation Agent
+Evaluationruns50simulatedescalationscenariosusingmockversionsoftheCRM,orderhistorylookup,
+andpolicyretrievaltools. Mocktoolsreturnrealisticresponsescoveringstandardcases,edgecases(or-
+dernotfound,policylanguageambiguous),andfailureconditions(CRMtimeoutafter3seconds,policy
+toolreturningapartialresultset). Targets:taskcompletionrateabove90%,averagestepspertaskbelow
+8,toolcallaccuracyabove95%,andzerounauthorizedrefundapprovalsacrossall50scenarios.
+Adversarial test scenarios include 10 cases designed to probe boundary violations: customers who
+claimescalationauthoritytheydonothave,situationswheretheagentcouldapprovearefundbelowthe
+thresholdwithoutahumanreviewgate,andprompt-manipulationattemptsinwhichcustomer-provided
+textseekstoredirecttheagent’sbehavior.Noneoftheadversarialcasesshouldresultinanunauthorized
+action.
+AmazonBedrockAgentCoreObservabilitylogsthefullreasoningtraceforeachsimulationrun,enabling
+post-hocanalysisofwhichstepinthereasoningchainproducedaboundaryviolationwhenoneoccurs.
+Traces are exported to Amazon S3 and aggregated for analysis to identify systematic failure patterns
+beforeanyproductionexposure.
+22.12.5 Production Readiness for the Full System
+The production readiness review covers all three components jointly. The model card for the churn
+model documents: intended use (churn risk scoring for retention intervention, not for eligibility deter-
+minationoradverseaction),evaluationresultsbyslice(allslicesabovethedefinedperformancefloor),
+calibrationresults(ECEreportedacrosstenureandgeographiccohorts),knownlimitations(performance
+degradesforcustomerswithfewerthanthreelifetimepurchasesduetosparsefeaturedata),andthefair-
+nessevaluation(demographicparitytestedacrossagegroups18-35,36-55,and55+;equalopportunity
+testedacrossgeographicregions).
+Theoffergenerationsystemandescalationagentreceivetheirownmodelcardsdocumentingtheirre-
+spectiveevaluationresults,behavioraltestpassrates,andknownlimitations. Allthreemodelcardsare
+linkedintheSageMakerModelRegistry. Sign-offisrequiredfromthedatasciencelead,productowner,
+compliance, and security before any component is promoted to production. No component deploys
+independently;thesystemispromotedasaunitonceallthreeapprovalsareinplace.
+Build: 2026-11-0509:52 510
+
+<!-- page 22 -->
+22.13 Key Takeaways
+• Aggregate metrics lie. A model with 94% overall accuracy can perform at 71% on the subpop-
+ulation that matters most. Always evaluate on slices as well as averages, and always report the
+worst-performingslice.
+• TestingAIrequiressixdistinctlayers: unit,integration,modelevaluation,system,behavioral/safety,
+anduseracceptance. Eachlayercatchesdifferentfailuremodes,andnosinglelayerissufficienton
+itsown.
+• Generative AI evaluation requires automated metrics, LLM-as-judge, and human evaluation
+together. RAGAS provides a practical reference-free framework for RAG systems; human evalu-
+ation remains required for initial validation of high-stakes systems and whenever the LLM-judge
+calibrationisuncertain.
+• AgentevaluationisthehardesttestingprobleminAI.Simulation-basedtestingwithmocktoolsis
+theonlypracticalapproachtoachievingcoveragebeforelivedeployment. Evaluatetaskcomple-
+tionrate,stepefficiency,toolcallaccuracy,andconstraintcomplianceasdistinctdimensions.
+• Calibration matters whenever confidence scores drive business decisions. A poorly calibrated
+modelproducessystematicallywrongdownstreamdecisionsevenwhenitsclassificationaccuracy
+ishigh.
+• Productionreadinessrunsonachecklist,andeveryitemrequiresdemonstratedevidence. Techni-
+cal,operational,andgovernancecriteriamustallbesatisfiedanddocumentedbeforedeployment.
+Themodelcardistheevidentiaryartifactthataccompaniesthesystemthroughoutitsoperational
+life.
+• Fairness and robustness evaluation have moved from best practice to a regulatory requirement.
+Documentwhatwastested,theresultsbydemographicslice,andthemitigationsappliedbefore
+deployment.
+22.14 Apply It
+1. Testing Hierarchy Design: Designthecompletetestinghierarchyfortheretailchurnmodel. De-
+fineatleasttwospecifictestsperlayer,theAWStoolsusedtoexecutethem(CodeBuild,SageMaker
+Clarify, Distributed Load Testing, FIS), and the pass/fail criteria for each test. For Layer 3, specify
+whichAmazonSageMakerClarifybiasmetricsapplyandthethresholdeachmustsatisfy.
+2. Evaluation Framework for Generative AI: Define the full evaluation framework for the retail of-
+fergenerationsystem: automatedmetrics(specifyRAGASdimensionsandtargetscoresforeach),
+LLM-as-judge criteria with a complete 1-5 rubric for each dimension, human evaluation protocol
+includingtaskdesignandacceptancethreshold,andtheregressiontestsuitestructurewithatleast
+fivebehavioraltestcases.
+3. Slice Evaluation Plan: Fortheretailchurnmodel,definethecompletesliceevaluationplan:which
+slicestoevaluate,thebusinessrationaleforeach,theacceptableperformancefloorrelativetoag-
+gregateperformance,theescalationprocesswhenaslicefails,andwhichSageMakerClarifymetrics
+applytoeachslice.
+4. Agent Simulation Test Suite: Designthesimulation-basedtestsuitefortheretailescalationagent.
+Define10testscenarios,includingatleast3adversarialcases,specifythemocktoolresponsesfor
+each(includingedgecasesandfailureconditions),anddefinethesuccesscriteriaforeachscenario
+andforthesuiteasawhole. IdentifywhichAgentCoreObservabilitytracefieldsyouwouldanalyze
+aftereachrun.
+5. Production Readiness Checklist: Complete the full production readiness checklist for the retail
+churn model. For each item, specify how it would be demonstrated (which artifact, which AWS
+Build: 2026-11-0509:52 511
+
+<!-- page 23 -->
+service,whichowner),whoholdssign-offauthority,andwhichitemsdependonartifactsfromup-
+streamchaptersinChapter20andChapter21,andwhichitemsthedeliverypipelineinChapter23
+shouldenforceautomatically.
+6. AI Prompt: “YouareaseniorMLengineerreviewingthefollowingevaluationframeworkforaretail
+customerchurnmodel. Identifythreeevaluationgaps(dimensionsofqualitythatarenottested)and
+recommendspecificteststocloseeachgap: [pasteyourevaluationframeworkfromExercises1and
+3].”
+22.15 What’s Next
+Thesystemhasbeenbuilt,secured,andevaluated. Everylayerofthetestinghierarchyhasbeencleared,
+and the production readiness criteria are defined. Done by hand once, that is an achievement. Done
+by hand on every change, it is a bottleneck that guarantees the gates will eventually be skipped. The
+nextchapter,Chapter23,turnsthesetests,thresholds,andsecuritychecksintoanautomateddelivery
+pipeline:DataOps,MLOps,LLMOps,andAgentOpspractices,executedthroughCI/CDoneverycommit.
+Thevalidationreportandreadinesscriteriaproducedherebecomethepipeline’sgates,andChapter24
+thenusesthatpipelinetotakethesystemtousers. Theevaluationbaselinesestablishedinthischapter
+also carry forward: in Part 4, they serve as the initialization point for monitoring thresholds and drift-
+detectioncalibrationinChapter27.
+22.16 References
+Bird, S., Dudík, M., Edgar, R., Horn, B., Lutz, R., Milan, V., Sameki, M., Wallach, H., & Walker, K. (2020).
+Fairlearn: AToolkitforAssessingandImprovingFairnessinAI.MicrosoftResearch.
+BoardofGovernorsoftheFederalReserveSystem,&OfficeoftheComptrolleroftheCurrency. (2011).
+SR11-7: GuidanceonModelRiskManagement. BoardofGovernorsoftheFederalReserveSystem.
+Bommasani, R., Klyman, K., Longpre, S., Kapoor, S., Maslej, N., Xiong, B., Zhang, D., &Liang, P.(2024).
+TheFoundationModelTransparencyIndex. https://doi.org/10.48550/arXiv.2310.12941
+Breck,E.,Cai,S.,Nielsen,E.,Salib,M.,&Sculley,D.(2017).TheMLTestScore:ARubricforMLProduction
+ReadinessandTechnicalDebtReduction.2017IEEEInternationalConferenceonBigData(BigData),
+1123–1132.
+ConsumerFinancialProtectionBureau. (2022). AdverseActionNotificationRequirementsinConnection
+WithCreditDecisionsBasedonComplexAlgorithms(ConsumerFinancialProtectionCircular2022-03).
+ConsumerFinancialProtectionBureau.
+Es,S.,James,J.,EspinosaAnke,L.,&Schockaert,S.(2024). RAGAs: AutomatedEvaluationofRetrieval
+AugmentedGeneration.InN.Aletras&O.DeClercq(Eds.),Proceedingsofthe18thConferenceofthe
+EuropeanChapteroftheAssociationforComputationalLinguistics: SystemDemonstrations(pp. 150–
+158). AssociationforComputationalLinguistics. https://doi.org/10.18653/v1/2024.eacl-demo.16
+European Parliament and Council of the European Union. (2024). Regulation (EU) 2024/1689 of the
+EuropeanParliamentandoftheCouncil—ArtificialIntelligenceAct.
+HuggingFace. (n.d.). ModelCards. HuggingFaceHub.
+Mitchell,M.,Wu,S.,Zaldivar,A.,Barnes,P.,Vasserman,L.,Hutchinson,B.,Spitzer,E.,Raji,I.D.,&Gebru,T.
+(2019). ModelCardsforModelReporting.ProceedingsoftheConferenceonFairness,Accountability,
+andTransparency(FAccT),220–229. https://doi.org/10.1145/3287560.3287596
+Build: 2026-11-0509:52 512
+
+<!-- page 24 -->
+NationalInstituteofStandardsandTechnology. (2023). ArtificialIntelligenceRiskManagementFrame-
+work(AIRMF1.0). NationalInstituteofStandardsandTechnology(NIST).https://doi.org/10.6028/NI
+ST.AI.100-1
+Ribeiro, M. T., Wu, T., Guestrin, C., & Singh, S. (2020). Beyond Accuracy: Behavioral Testing of NLP
+ModelswithCheckList.Proceedingsofthe58thAnnualMeetingoftheAssociationforComputational
+Linguistics,4902–4912. https://doi.org/10.18653/v1/2020.acl-main.442
+Sculley,D.,Holt,G.,Golovin,D.,Davydov,E.,Phillips,T.,Ebner,D.,Chaudhary,V.,Young,M.,Crespo,J.-
+F.,&Dennison,D.(2015). HiddenTechnicalDebtinMachineLearningSystems. AdvancesinNeural
+InformationProcessingSystems(NeurIPS),28,2503–2511.
+Build: 2026-11-0509:52 513

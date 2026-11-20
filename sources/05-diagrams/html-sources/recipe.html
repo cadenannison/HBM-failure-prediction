@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Archivo"; font-weight: 700; src: url("node_modules/@fontsource/archivo/files/archivo-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Archivo"; font-weight: 800; src: url("node_modules/@fontsource/archivo/files/archivo-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 400; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 500; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 600; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "PlexMono"; font-weight: 400; src: url("node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "PlexMono"; font-weight: 500; src: url("node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); }
+
+:root {
+  --bg: #F4F6F6;
+  --panel: #FFFFFF;
+  --fg: #152120;
+  --muted: #5A6866;
+  --line: #CFD7D6;
+  --soft: #E7ECEB;
+  --accent: #0E7A6C;
+  --c-data: #2F6FB3;
+  --c-model: #0E7A6C;
+  --c-xops: #6B57C9;
+  --c-econ: #A3478A;
+  --c-all: #56636A;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); }
+body { font-family: "Plex", sans-serif; color: var(--fg); width: 1600px; }
+#canvas { position: relative; width: 1600px; padding: 44px 44px 36px; background: var(--bg); }
+
+.top { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px; }
+.eyebrow { font-family: "PlexMono", monospace; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+h1 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 46px; letter-spacing: -0.01em; line-height: 1; }
+.sub { font-size: 16px; color: var(--muted); margin-top: 10px; }
+.legend { display: grid; grid-template-columns: auto auto auto; gap: 8px 22px; font-size: 13.5px; color: var(--fg); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.ldot { width: 13px; height: 13px; border-radius: 50%; display: inline-block; }
+
+.flow { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); column-gap: 38px; align-items: center; }
+.col { display: flex; flex-direction: column; gap: 22px; position: relative; z-index: 2; }
+.par-tag {
+  font-family: "PlexMono", monospace; font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent); text-align: center; margin-bottom: -12px;
+}
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+.ph { display: flex; justify-content: space-between; align-items: baseline; padding: 0 2px 6px; border-bottom: 2px solid var(--fg); }
+.ph b { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 19px; }
+.ph span { font-family: "PlexMono", monospace; font-size: 11.5px; color: var(--muted); }
+.step { display: grid; grid-template-columns: 30px 1fr; gap: 9px; align-items: start; padding: 7px 4px; }
+.step + .step { border-top: 1px solid var(--soft); }
+.n {
+  width: 28px; height: 28px; border-radius: 50%; color: #fff;
+  font-family: "Archivo", sans-serif; font-weight: 800; font-size: 14px;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px;
+}
+.st b { display: block; font-weight: 600; font-size: 14.5px; line-height: 1.25; }
+.st span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.feeds { font-family: "PlexMono", monospace; font-size: 11px; color: var(--accent); padding: 6px 4px 0; border-top: 1px dashed var(--line); line-height: 1.4; }
+
+.data { background: var(--c-data); } .model { background: var(--c-model); } .xops { background: var(--c-xops); } .econ { background: var(--c-econ); } .all { background: var(--c-all); }
+
+svg#wires { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; }
+
+.foot { display: flex; justify-content: space-between; margin-top: 28px; font-size: 12.5px; color: var(--muted); }
+.foot b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div class="top">
+    <div>
+      <div class="eyebrow">CS 401R · Build recipe</div>
+      <h1>HBM Early Warning</h1>
+      <div class="sub">22 steps from an empty repo to a submitted design doc. Follow left to right; stacked phases run in parallel.</div>
+    </div>
+    <div class="legend">
+      <span><i class="ldot model"></i>Lead + modeling</span>
+      <span><i class="ldot data"></i>Data &amp; platform</span>
+      <span><i class="ldot xops"></i>XOps &amp; deployment</span>
+      <span><i class="ldot econ"></i>Economics &amp; governance</span>
+      <span><i class="ldot all"></i>Whole team</span>
+    </div>
+  </div>
+
+  <div class="flow" id="flow">
+    <svg id="wires"><defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5A6866"/></marker></defs></svg>
+
+    <!-- Prep -->
+    <div class="col">
+      <div class="panel" id="prep">
+        <div class="ph"><b>Prep</b><span>1–3</span></div>
+        <div class="step"><div class="n model">1</div><div class="st"><b>Form the team</b><span>One owner per workstream</span></div></div>
+        <div class="step"><div class="n data">2</div><div class="st"><b>Set up the repo</b><span>Reuse the lab layout, README with run commands</span></div></div>
+        <div class="step"><div class="n data">3</div><div class="st"><b>Get the data</b><span>git clone Calchas (24 MB), record the commit</span></div></div>
+      </div>
+    </div>
+
+    <!-- Define -->
+    <div class="col">
+      <div class="panel" id="define">
+        <div class="ph"><b>Define</b><span>4–5</span></div>
+        <div class="step"><div class="n model">4</div><div class="st"><b>Explore the errors</b><span>Error mix, time between errors, row / column / bank clusters</span></div></div>
+        <div class="step"><div class="n model">5</div><div class="st"><b>Define task + metrics</b><span>Failure, windows, levels, recall floor per level</span></div></div>
+        <div class="feeds">Doc: problem statement, success metrics</div>
+      </div>
+    </div>
+
+    <!-- Pipeline || Models -->
+    <div class="col">
+      <div class="par-tag">In parallel</div>
+      <div class="panel" id="pipe">
+        <div class="ph"><b>Pipeline</b><span>6–9</span></div>
+        <div class="step"><div class="n data">6</div><div class="st"><b>Stand up the platform</b><span>Terraform: S3, IAM, SageMaker, Glue, Feature Store</span></div></div>
+        <div class="step"><div class="n data">7</div><div class="st"><b>Data contract</b><span>Schema, ECC types, hex addresses, dedupe gates</span></div></div>
+        <div class="step"><div class="n data">8</div><div class="st"><b>Feature job</b><span>Glue: windowed CE / UE counts per level</span></div></div>
+        <div class="step"><div class="n data">9</div><div class="st"><b>Load Feature Store</b><span>Offline for training, online for scoring</span></div></div>
+        <div class="feeds">Doc: platform architecture, data &amp; feature pipeline</div>
+      </div>
+      <div class="panel" id="models">
+        <div class="ph"><b>Models</b><span>10–12</span></div>
+        <div class="step"><div class="n model">10</div><div class="st"><b>Train baselines</b><span>LR, random forest, XGBoost per level in MLflow</span></div></div>
+        <div class="step"><div class="n model">11</div><div class="st"><b>Time split + tune</b><span>Threshold per level, compare to paper F1</span></div></div>
+        <div class="step"><div class="n model">12</div><div class="st"><b>Model card</b><span>Metrics, thresholds, known limits</span></div></div>
+        <div class="feeds">Doc: model development</div>
+      </div>
+    </div>
+
+    <!-- Ship -->
+    <div class="col">
+      <div class="panel" id="ship">
+        <div class="ph"><b>Ship</b><span>13–16</span></div>
+        <div class="step"><div class="n xops">13</div><div class="st"><b>Registry + approval gate</b><span>A human approves before scoring</span></div></div>
+        <div class="step"><div class="n xops">14</div><div class="st"><b>Retraining + CI tests</b><span>SageMaker Pipeline, recall floor, no regression</span></div></div>
+        <div class="step"><div class="n xops">15</div><div class="st"><b>Hourly batch scoring</b><span>Retire row, spare bank, or drain server</span></div></div>
+        <div class="step"><div class="n xops">16</div><div class="st"><b>Rollout plan</b><span>Shadow, then advisory, then auto for rows only</span></div></div>
+        <div class="feeds">Doc: XOps plan, deployment strategy</div>
+      </div>
+    </div>
+
+    <!-- Operate || Justify -->
+    <div class="col">
+      <div class="par-tag">In parallel</div>
+      <div class="panel" id="operate">
+        <div class="ph"><b>Operate</b><span>17</span></div>
+        <div class="step"><div class="n xops">17</div><div class="st"><b>Monitoring + SLOs</b><span>Drift, precision / recall, alerts, runbook</span></div></div>
+        <div class="feeds">Doc: operating model</div>
+      </div>
+      <div class="panel" id="justify">
+        <div class="ph"><b>Justify</b><span>18–19</span></div>
+        <div class="step"><div class="n econ">18</div><div class="st"><b>Cost model + ROI</b><span>Crashed-job cost vs action cost, false-alarm sensitivity</span></div></div>
+        <div class="step"><div class="n econ">19</div><div class="st"><b>Governance</b><span>Automation tiers, sign-off for drains, audit trail</span></div></div>
+        <div class="feeds">Doc: economics, governance</div>
+      </div>
+    </div>
+
+    <!-- Finish -->
+    <div class="col">
+      <div class="panel" id="finish">
+        <div class="ph"><b>Finish</b><span>20–22</span></div>
+        <div class="step"><div class="n all">20</div><div class="st"><b>Assemble the doc</b><span>Eight sections plus the architecture diagram</span></div></div>
+        <div class="step"><div class="n all">21</div><div class="st"><b>Review + rerun</b><span>Cross-review, numbers match the code</span></div></div>
+        <div class="step"><div class="n data">22</div><div class="st"><b>Tear down + submit</b><span>Destroy AWS resources, turn it in</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span><b>Data:</b> Calchas HBM error dataset (github.com/wrl297/Calchas), Wu et al., USENIX ATC 2024</span>
+    <span>Each phase ends with the design doc sections it feeds</span>
+  </div>
+</div>
+
+<script>
+function wire() {
+  var flow = document.getElementById('flow');
+  var svg = document.getElementById('wires');
+  var fr = flow.getBoundingClientRect();
+  var pairs = [['prep','define'],['define','pipe'],['define','models'],['pipe','ship'],['models','ship'],['ship','operate'],['ship','justify'],['operate','finish'],['justify','finish']];
+  pairs.forEach(function (p) {
+    var a = document.getElementById(p[0]).getBoundingClientRect();
+    var b = document.getElementById(p[1]).getBoundingClientRect();
+    var x1 = a.right - fr.left, y1 = a.top + a.height / 2 - fr.top;
+    var x2 = b.left - fr.left - 3, y2 = b.top + b.height / 2 - fr.top;
+    var mx = (x1 + x2) / 2;
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#5A6866');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('marker-end', 'url(#ah)');
+    svg.appendChild(path);
+  });
+  document.body.setAttribute('data-ready', '1');
+}
+document.fonts.ready.then(wire);
+</script>
+</body>
+</html>

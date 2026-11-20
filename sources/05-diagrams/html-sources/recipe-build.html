@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "Archivo"; font-weight: 800; src: url("node_modules/@fontsource/archivo/files/archivo-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 400; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Plex"; font-weight: 600; src: url("node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+:root { --bg: #F4F6F6; --fg: #152120; --muted: #5A6866; --accent: #0E7A6C; --line: #B9C6C4; --tag: #E2ECEA; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1600px; background: var(--bg); font-family: "Plex", sans-serif; color: var(--fg); }
+#canvas { width: 1600px; padding: 56px 60px 60px; background: var(--bg); }
+h1 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 56px; line-height: 1; letter-spacing: -0.01em; }
+.sub { font-size: 20px; color: var(--muted); margin-top: 12px; }
+
+.track { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 36px; margin-top: 52px; }
+.track + .track { margin-top: 44px; }
+.track::before { content: ""; position: absolute; left: 30px; right: calc((100% - 108px) / 4 - 30px); top: 29px; height: 3px; background: var(--line); }
+.stage { position: relative; display: flex; flex-direction: column; gap: 12px; }
+.dot {
+  width: 60px; height: 60px; border-radius: 50%; background: var(--accent); color: #fff;
+  font-family: "Archivo", sans-serif; font-weight: 800; font-size: 28px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 8px var(--bg);
+}
+.stage h2 { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 27px; line-height: 1.1; margin-top: 4px; }
+.tag { align-self: flex-start; font-size: 14px; font-weight: 600; color: var(--accent); background: var(--tag); border-radius: 999px; padding: 3px 11px; white-space: nowrap; }
+.lbl { font-size: 13px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-top: 4px; }
+.design { font-size: 17px; line-height: 1.35; margin-top: -6px; }
+.stage ul { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: -4px; }
+.stage li { font-size: 17px; line-height: 1.35; padding-left: 16px; position: relative; }
+.stage li::before { content: ""; position: absolute; left: 0; top: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+.finish { margin-top: 48px; display: flex; align-items: center; gap: 22px; background: var(--tag); border-radius: 12px; padding: 18px 24px; }
+.finish b { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 24px; color: var(--accent); }
+.finish span { font-size: 18px; }
+.finish i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1>HBM Early Warning</h1>
+  <div class="sub">Design and build it layer by layer. Each stage makes one design decision, then builds it.</div>
+
+  <div class="track">
+    <div class="stage">
+      <div class="dot">1</div><h2>Understand the data</h2><span class="tag">Problem framing</span>
+      <div class="lbl">Design</div><div class="design">What counts as a failure, how far ahead to predict, at which levels</div>
+      <div class="lbl">Build</div>
+      <ul><li>Clone the Calchas dataset</li><li>EDA: error mix, errors per server, row / column / bank clusters</li><li>One-page task spec</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">2</div><h2>Platform</h2><span class="tag">Platform architecture</span>
+      <div class="lbl">Design</div><div class="design">AWS stack and access model, recorded in an ADR</div>
+      <div class="lbl">Build</div>
+      <ul><li>Terraform: VPC, S3 raw / processed / features</li><li>IAM roles, plus a read-only FleetOps role</li><li>VPC-only SageMaker</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">3</div><h2>Data pipeline</h2><span class="tag">Data &amp; feature pipeline</span>
+      <div class="lbl">Design</div><div class="design">Data contract: schema, valid ECC types, dedupe rules</div>
+      <div class="lbl">Build</div>
+      <ul><li>Glue job: raw logs to windowed CE / UE counts</li><li>Features per row, column, bank, server</li><li>Quality gates, then Feature Store</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">4</div><h2>Models</h2><span class="tag">Model development</span>
+      <div class="lbl">Design</div><div class="design">One model per level, threshold set by the cost of its action</div>
+      <div class="lbl">Build</div>
+      <ul><li>Logistic regression, random forest, XGBoost</li><li>Train on early months, test on later</li><li>Beat the paper's F1, log in MLflow, model card</li></ul>
+    </div>
+  </div>
+
+  <div class="track">
+    <div class="stage">
+      <div class="dot">5</div><h2>XOps</h2><span class="tag">XOps plan</span>
+      <div class="lbl">Design</div><div class="design">Promotion rules: recall floor and no regression vs. the champion</div>
+      <div class="lbl">Build</div>
+      <ul><li>Model registry with human approval</li><li>Retraining pipeline: features, train, evaluate, register</li><li>CI tests for data and models</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">6</div><h2>Deploy</h2><span class="tag">Deployment strategy</span>
+      <div class="lbl">Design</div><div class="design">Action tiers: retire row, spare bank, drain server</div>
+      <div class="lbl">Build</div>
+      <ul><li>Hourly batch inference</li><li>Shadow, then canary, then auto for rows only</li><li>One-step rollback to the last model</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">7</div><h2>Operate</h2><span class="tag">Operating model</span>
+      <div class="lbl">Design</div><div class="design">SLOs, and what each alert means for the on-call engineer</div>
+      <div class="lbl">Build</div>
+      <ul><li>Drift monitors: CE rate, temperature, prediction mix</li><li>Precision and recall from late-arriving labels</li><li>Runbook, with hardware ECC as the fallback</li></ul>
+    </div>
+    <div class="stage">
+      <div class="dot">8</div><h2>Justify + govern</h2><span class="tag">Economics + governance</span>
+      <div class="lbl">Design</div><div class="design">Cost of a crashed job vs. the cost of each action</div>
+      <div class="lbl">Build</div>
+      <ul><li>Cost model with ROI sensitivity</li><li>Audit trail for every prediction and action</li><li>Human sign-off for server drains</li></ul>
+    </div>
+  </div>
+
+  <div class="finish">
+    <b>Then</b>
+    <span>Link all 8 layers into one story</span><i></i>
+    <span>Exec summary with the dollar impact</span><i></i>
+    <span>15-minute deck + Q&amp;A</span>
+  </div>
+</div>
+<script>document.fonts.ready.then(function(){ document.body.setAttribute('data-ready','1'); });</script>
+</body>
+</html>
