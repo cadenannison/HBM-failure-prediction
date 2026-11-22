@@ -1,0 +1,13 @@
+# Terraform local state, credentials/configuration, and saved plans
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+
+# Python
+__pycache__/
+*.pyc

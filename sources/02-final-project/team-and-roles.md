@@ -59,5 +59,5 @@ About 20 hours each over four weeks, plus shared work at the end.
 
 ## Open decisions
 
-- Whose AWS account, and how to split the bill (syllabus: each student pays their own, about $50 to $100).
+- Access plan: host project resources in the Data and platform owner's account and let teammates assume scoped cross-account roles using their own IAM users with MFA. See [IAM access plan](docs/iam-access-plan.md). Cost sharing remains open (syllabus: each student pays their own, about $50 to $100).
 - Where the demo app runs (a laptop is enough for Dec 16).

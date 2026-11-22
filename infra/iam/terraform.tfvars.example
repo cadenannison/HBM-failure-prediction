@@ -1,0 +1,56 @@
+# EXAMPLE ONLY. Copy to terraform.tfvars, replace every example value, and review
+# a saved plan before apply. These source users must actually exist for apply.
+host_account_id  = "278634873542"
+region           = "us-east-1"
+data_bucket_name = "panic-data-278634873542"
+
+source_user_arns = {
+  lead_ml = "arn:aws:iam::111122223333:user/REPLACE_WITH_RJ"
+  mlops   = "arn:aws:iam::444455556666:user/REPLACE_WITH_CADEN"
+  app     = "arn:aws:iam::777788889999:user/REPLACE_WITH_JOE"
+}
+
+# Add only after platform Terraform creates APIs, service roles, and attaches
+# their approved permission boundaries. The stack verifies actual role state.
+api_gateway_api_ids = []
+execution_roles     = {}
+
+# Fill from platform Terraform when Studio is provisioned (IAM-auth mode).
+studio_workspaces = {}
+# studio_workspaces = {
+#   lead_ml = {
+#     domain_id = "d-REPLACE"
+#     user_profile_name = "panic-rj"
+#     space_name_prefix = "panic-rj-"
+#   }
+#   mlops = {
+#     domain_id = "d-REPLACE"
+#     user_profile_name = "panic-caden"
+#     space_name_prefix = "panic-caden-"
+#   }
+# }
+
+# Optional exact AWS/vendor ECR repositories for prebuilt container images.
+additional_image_repository_arns = []
+
+# Example structure (these roles are not created by this stack):
+# execution_roles = {
+#   training = {
+#     owner   = "mlops"
+#     arn     = "arn:aws:iam::278634873542:role/panic-execution/training"
+#     service = "sagemaker.amazonaws.com"
+#     permissions_boundary_arn = "arn:aws:iam::278634873542:policy/panic-boundaries/mlops"
+#   }
+#   scoring = {
+#     owner   = "app"
+#     arn     = "arn:aws:iam::278634873542:role/panic-execution/scoring"
+#     service = "lambda.amazonaws.com"
+#     permissions_boundary_arn = "arn:aws:iam::278634873542:policy/panic-boundaries/app"
+#   }
+#   rj_training = {
+#     owner = "lead_ml"
+#     arn = "arn:aws:iam::278634873542:role/panic-execution/rj-training"
+#     service = "sagemaker.amazonaws.com"
+#     permissions_boundary_arn = "arn:aws:iam::278634873542:policy/panic-boundaries/lead-ml"
+#   }
+# }

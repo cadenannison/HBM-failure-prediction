@@ -18,6 +18,11 @@ What we decided and why, in order.
 | Nov 20 | Renamed to **PANIC** (Predictive Anomaly Notification for Interposer Components) | Team name tie-in |
 | Nov 20 | Roles: RJ lead and ML, Tom data and platform, Caden MLOps and reliability, Joe app and business | Charter |
 | Nov 20 | New AWS services beyond the labs: Kinesis, SageMaker Pipelines, API Gateway, Step Functions | "Extends in-class learning" grading element |
+| Nov 21 | Plan for teammates to assume scoped cross-account roles in the shared hosting account using their own IAM users with MFA | Reuse existing sign-ins and MFA; avoid duplicate teammate users in the hosting account. Hosting account pays project charges; reimbursement remains open. Details: [IAM access plan](docs/iam-access-plan.md). |
+| Nov 21 | Define the three permission baselines in a separate Terraform IAM stack | Review explicit grants before deployment; platform retains IAM/shared infrastructure, while teammates manage their project components. See [Terraform permissions matrix](../../infra/iam/README.md). No apply performed. |
+| Nov 21 | Allow RJ's human role to upload/replace project S3 raw data and features | Supports ML data preparation and corrections. Caden/Joe do not gain those writes; object deletion stays excluded. Terraform updated; no apply performed. |
+| Nov 21 | Delegate each teammate's assigned execution-role inline permissions to that teammate | Owners can maintain runtime permissions themselves within a platform-controlled boundary. Human roles, execution-role trust/boundaries/creation, and cross-owner changes remain with platform. New direct human access or a wider boundary still needs a platform Terraform change. No apply performed. |
+| Nov 21 | Broaden development access within each owner's planned service families | Implement Studio assignment templates, RJ/Caden cloud job variants and MLflow, Caden/Joe ECR ownership, and central runtime boundaries in Terraform. Naming patterns cover future matching resources. IAM administration, billing, networking, API IDs, and execution-role ownership remain controlled. No apply performed. |
 
 ## Model choices
 
