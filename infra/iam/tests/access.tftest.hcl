@@ -3,11 +3,6 @@ mock_provider "aws" {}
 
 variables {
   data_bucket_name = "panic-test-data"
-  source_user_arns = {
-    lead_ml = "arn:aws:iam::111122223333:user/rj"
-    mlops   = "arn:aws:iam::444455556666:user/caden"
-    app     = "arn:aws:iam::777788889999:user/joe"
-  }
 }
 
 run "default_role_boundaries" {
@@ -15,10 +10,10 @@ run "default_role_boundaries" {
 
   assert {
     condition = alltrue([for key, policy in output.trust_policies :
-      jsondecode(policy).Statement[0].Principal.AWS == var.source_user_arns[key] &&
+      jsondecode(policy).Statement[0].Principal.AWS == "arn:aws:iam::${var.host_account_id}:user/panic-team/${var.teammate_user_names[key]}" &&
       jsondecode(policy).Statement[0].Condition.Bool["aws:MultiFactorAuthPresent"] == "true"
     ])
-    error_message = "Every role must trust only its assigned user and require MFA."
+    error_message = "Every role must trust only its assigned host-account user and require MFA."
   }
   assert {
     condition = alltrue(flatten([for document in values(output.policy_documents) : [
@@ -209,28 +204,73 @@ run "discovery_can_be_disabled" {
   }
 }
 
-run "reject_root_principal" {
+run "reject_duplicate_users" {
   command = plan
   variables {
-    source_user_arns = {
-      lead_ml = "arn:aws:iam::111122223333:root"
-      mlops   = "arn:aws:iam::444455556666:user/caden"
-      app     = "arn:aws:iam::777788889999:user/joe"
+    teammate_user_names = {
+      lead_ml = "panic-rj"
+      mlops   = "panic-rj"
+      app     = "panic-joe"
     }
   }
-  expect_failures = [var.source_user_arns]
+  expect_failures = [var.teammate_user_names]
 }
 
-run "reject_wildcard_principal" {
+run "reject_wildcard_username" {
   command = plan
   variables {
-    source_user_arns = {
-      lead_ml = "arn:aws:iam::111122223333:user/*"
-      mlops   = "arn:aws:iam::444455556666:user/caden"
-      app     = "arn:aws:iam::777788889999:user/joe"
+    teammate_user_names = {
+      lead_ml = "panic-*"
+      mlops   = "panic-caden"
+      app     = "panic-joe"
     }
   }
-  expect_failures = [var.source_user_arns]
+  expect_failures = [var.teammate_user_names]
+}
+
+run "local_user_onboarding_is_self_scoped" {
+  command = plan
+  assert {
+    condition = alltrue([for owner, document in output.user_policy_documents :
+      contains(jsondecode(document).Statement[1].Action, "iam:ChangePassword") &&
+      contains(jsondecode(document).Statement[1].Action, "iam:EnableMFADevice") &&
+      jsondecode(document).Statement[1].Resource == ["arn:aws:iam::${var.host_account_id}:user/panic-team/${var.teammate_user_names[owner]}"] &&
+      jsondecode(document).Statement[4].Resource == [output.role_arns[owner]] &&
+      jsondecode(document).Statement[4].Condition.Bool["aws:MultiFactorAuthPresent"] == "true" &&
+      jsondecode(document).Statement[3].Condition.Bool["aws:MultiFactorAuthPresent"] == "true" &&
+      alltrue(flatten([for statement in jsondecode(document).Statement : [for action in statement.Action :
+        startswith(action, "iam:") || action == "sts:AssumeRole"
+      ]]))
+    ])
+    error_message = "Users need first-login password/MFA setup for themselves, assigned-role-only MFA access, and no direct project-service grants."
+  }
+  assert {
+    condition = alltrue([for owner, document in output.user_policy_documents :
+      jsondecode(document).Statement[2].Resource == [
+        "arn:aws:iam::${var.host_account_id}:mfa/${var.teammate_user_names[owner]}",
+        "arn:aws:iam::${var.host_account_id}:mfa/${var.teammate_user_names[owner]}-*"
+      ] &&
+      jsondecode(document).Statement[3].Resource == ["arn:aws:iam::${var.host_account_id}:user/panic-team/${var.teammate_user_names[owner]}"] &&
+      !strcontains(document, "iam:PutUserPolicy") && !strcontains(document, "iam:AttachUserPolicy") && !strcontains(document, "iam:CreateLoginProfile")
+    ])
+    error_message = "Credential management must stay within each user's own namespace and exclude permission/password administration."
+  }
+  assert {
+    condition     = length(aws_iam_user.teammate) == 3 && alltrue([for user in values(aws_iam_user.teammate) : user.path == "/panic-team/" && user.force_destroy == false])
+    error_message = "Create exactly three project users without force-deleting their credentials."
+  }
+}
+
+run "reject_overlapping_mfa_namespaces" {
+  command = plan
+  variables {
+    teammate_user_names = {
+      lead_ml = "panic-rj"
+      mlops   = "panic-rj-other"
+      app     = "panic-joe"
+    }
+  }
+  expect_failures = [var.teammate_user_names]
 }
 
 run "reject_passing_human_role" {

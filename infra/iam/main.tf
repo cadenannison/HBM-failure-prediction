@@ -5,11 +5,12 @@ locals {
     app     = "panic-app"
   }
   role_arns = { for key, name in local.role_names : key => "arn:aws:iam::${var.host_account_id}:role/${name}" }
+  user_arns = { for key, name in var.teammate_user_names : key => "arn:aws:iam::${var.host_account_id}:user/panic-team/${name}" }
   trust_policies = {
-    for key, principal in var.source_user_arns : key => jsonencode({
+    for key, principal in local.user_arns : key => jsonencode({
       Version = "2012-10-17"
       Statement = [{
-        Sid       = "AssignedExternalUserWithMFA"
+        Sid       = "AssignedLocalUserWithMFA"
         Effect    = "Allow"
         Principal = { AWS = principal }
         Action    = "sts:AssumeRole"
@@ -47,10 +48,12 @@ data "aws_iam_role" "execution" {
 resource "aws_iam_role" "teammate" {
   for_each             = local.role_names
   name                 = each.value
-  description          = "PANIC ${each.key}: external IAM user with MFA; project-scoped access"
+  description          = "PANIC ${each.key}: local IAM user with MFA; project-scoped access"
   assume_role_policy   = local.trust_policies[each.key]
   max_session_duration = 3600
   tags                 = { Owner = each.key }
+  # Trust uses deterministic ARNs, but AWS requires those principals to exist.
+  depends_on = [aws_iam_user.teammate]
 
   lifecycle {
     precondition {

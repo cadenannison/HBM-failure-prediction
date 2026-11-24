@@ -1,8 +1,10 @@
-# PANIC cross-account IAM
+# PANIC team IAM
 
-This Terraform stack builds three human project roles in the hosting account, their development permission policies, three platform-owned execution-role permissions boundaries, MFA-protected trust, and outputs for teammate onboarding. It does not create users, passwords, access keys, service execution roles, APIs, buckets, Studio domains/profiles, repositories, or running workloads. Each teammate retains their existing IAM user and MFA in their own account. No apply has been performed.
+This Terraform stack creates three IAM users in the hosting account (`panic-rj`, `panic-caden`, `panic-joe` under `/panic-team/`), their credential self-service policies, three human project roles and development permission policies, and three platform-owned execution-role permissions boundaries. Every project role requires its assigned user to authenticate with MFA. Teammates do not need personal AWS accounts. This replaces the earlier cross-account plan. No apply has been performed.
 
-The default account is `278634873542`, with project resources in `us-east-1`. The provider rejects another account. IAM is global; workload ARNs are limited to the configured account/Region. Source-account policy snippets are outputs for teammates to install themselves; this stack has no credentials for their accounts.
+The default account is `278634873542`, with project resources in `us-east-1`. The provider rejects another account. IAM is global; workload ARNs are limited to the configured account/Region. Use your IAM administrator identity for setup; these users belong to the AWS account, and teammates never receive or use its root login. All project charges stay with the hosting account.
+
+Terraform does not create passwords, login profiles, access keys, MFA seeds, service execution roles, APIs, buckets, Studio domains/profiles, repositories, or running workloads. Console passwords are enabled privately by the administrator after apply, and teammates enroll MFA themselves. This keeps generated credentials out of Terraform state.
 
 ## Permissions to review
 
@@ -28,7 +30,7 @@ Registry authentication (`ecr:GetAuthorizationToken`) and MLflow UI authenticati
 
 ## Dependencies and limits
 
-- Collect verified source IAM user ARNs and confirm MFA first. Root, Identity Center sessions, and arbitrary federated roles are not supported by this IAM-user trust configuration.
+- No source-account IDs or ARNs are needed. Configure the optional `teammate_user_names` map or use its defaults; Terraform creates and trusts those local users. If a matching IAM user already exists outside Terraform, inspect/import it rather than trying to create a duplicate. If this stack was previously applied with external principals, review the plan: trust changes replace their access, while existing role/resource names remain stable. Revoking old active sessions is a separate operational step.
 - Create the project data bucket separately. Data ingestion execution roles write raw/features during normal processing; RJ can also directly upload or replace objects in those S3 prefixes for data preparation and corrections. This S3 grant does not grant SageMaker Feature Store record ingestion or feature-group administration.
 - This stack creates platform-owned boundaries at `/panic-boundaries/lead-ml`, `/panic-boundaries/mlops`, and `/panic-boundaries/app`. Foundation creates execution roles separately under `/panic-execution/` and attaches the owner's boundary. Supply exact role ARNs, one owner per role, intended service, and the corresponding `permissions_boundary_arn`. The stack reads the actual role and refuses delegation if its ARN or attached boundary differs from the assignment and generated owner boundary. It does not create roles or attach boundaries to them.
 - Each owner can inspect, create, edit, and delete inline permission policies on only their assigned execution roles. The delegated actions are `iam:GetRole`, `iam:GetRolePolicy`, `iam:ListRolePolicies`, `iam:ListAttachedRolePolicies`, `iam:PutRolePolicy`, and `iam:DeleteRolePolicy`, plus service-constrained `iam:PassRole`. They may use the inline JSON policy editor, AWS CLI, or `aws_iam_role_policy` in their component Terraform. IAM role-list discovery is not granted; open the assigned role directly or use its exact name with CLI/Terraform.
@@ -54,32 +56,47 @@ terraform init
 terraform fmt -check
 terraform validate
 terraform test
-terraform plan -out=iam.tfplan
+terraform plan "-out=iam.tfplan"
 terraform show iam.tfplan
 ```
 
-These commands assume this directory is the working directory. `terraform test` uses a mocked AWS provider and performs no AWS reads/writes; it checks trust, escalation boundaries, approval ownership, storage protection, input rejection, and conditional API/PassRole grants. A real `plan` reads the hosting account and needs credentials. Provider downloads require network access. Example source accounts/users are fictitious; never apply them.
+These commands assume this directory is the working directory. `terraform test` uses a mocked AWS provider and performs no AWS reads/writes; it checks local-user creation, self-scoped onboarding, MFA-protected trust, escalation boundaries, approval ownership, storage protection, input rejection, and conditional API/PassRole grants. A real `plan` reads the hosting account and needs credentials. Provider downloads require network access. Replace workload/resource placeholders in the example before applying it.
 
-After policy review and receiving the real teammate identities, use `terraform apply iam.tfplan` to deploy the reviewed plan. Deployment has not been performed. Local state and variable files are ignored; the dependency lock file should be committed. IAM state has no generated credentials in this design, but still contains account/user identifiers. Move to a restricted remote backend before multiple people administer this stack. Keep its state separate from component states.
+In PowerShell, quote the complete `-out=iam.tfplan` argument as shown; otherwise some versions split the filename and Terraform reports "Too many command line arguments". From the repository root, use `terraform -chdir=infra/iam plan "-out=iam.tfplan"` instead. The saved plan is then `infra/iam/iam.tfplan`.
+
+After policy review and confirming the hosting account, usernames, and resource inputs, use `terraform apply iam.tfplan` to deploy the reviewed plan. Deployment has not been performed. Local state and variable files are ignored; the dependency lock file should be committed. IAM state has no generated credentials in this design, but still contains account/user identifiers. Move to a restricted remote backend before multiple people administer this stack. Keep its state separate from component states.
 
 After apply, retrieve onboarding details:
 
 ```powershell
 terraform output role_arns
 terraform output switch_role_urls
-terraform output source_account_policies
+terraform output teammate_users
+terraform output console_sign_in_url
 terraform output execution_boundary_arns
 ```
 
-Each teammate or their source administrator attaches only the returned policy for their own role. They sign into their existing IAM user with MFA, open the Switch Role link, and verify identity. For CLI setup, see the [access plan](../../sources/02-final-project/docs/iam-access-plan.md). You never need their source credentials or MFA codes.
+After apply, complete these steps using an IAM administrator session:
+
+1. In IAM > Users, open each created user > Security credentials > Enable console access. Generate a unique temporary password and require a password change at next sign-in. Do not attach an administrator or project-service policy directly to the user. Their Terraform-managed policy already permits their own password change and MFA enrollment.
+2. Privately deliver the shared account sign-in URL, their individual username, and their temporary password. Keep passwords outside Git, chat logs used for project documentation, saved plans, and Terraform variables/state.
+3. Each teammate signs in, changes their password, opens My security credentials, and enrolls MFA. For an authenticator, name the device `<username>-phone`, such as `panic-rj-phone`; the user policy permits their own name or `<username>-*` MFA namespace only. Each user manages only their own credentials. An MFA-authenticated session is required to deactivate MFA or manage access keys; lost-device recovery goes through the administrator.
+4. They sign out and sign back in with MFA, then follow their Switch Role link. Verify that the active identity is their assigned `panic-*` role before project work. Their IAM user has credential self-service only; service permissions come from the role. Before MFA, only onboarding/self-service is available, not project access.
+5. Verify each user can assume only their assigned role and cannot access another person's credentials or modify human access policies. Confirm a password-only session cannot assume a project role. Role trust and the user's `AssumeRole` policy both require MFA.
+
+The user policy intentionally allows first-login password change and MFA enrollment before MFA. We do not attach AWS's generic deny-without-MFA policy unchanged, because it blocks a required initial password reset. No general project access is attached to the user to bypass the role's MFA check. Account-wide password settings are not modified by this stack.
+
+For CLI/Terraform, after enrolling MFA, a teammate can return to their IAM user session (exit the project role), authenticate with MFA, and create/manage their own access key privately. Configure it locally as the source profile `panic-user`; the role profile then uses `role_arn`, `source_profile=panic-user`, and the enrolled `mfa_serial` in the hosting account. Keys have no direct project-service grants and cannot assume a project role without MFA. No key creation by Terraform is needed. CLI MFA examples use a TOTP authenticator; verify an appropriate supported flow before choosing a security-key-only CLI setup. See the [access plan](../../sources/02-final-project/docs/iam-access-plan.md).
+
+If the account uses AWS's newer sign-up experience and the console does not permit IAM user console passwords, first confirm the account's supported activation/access path. Do not silently change the account plan or enable Organizations/Identity Center to work around it.
 
 For the initial foundation rollout, first apply this IAM stack with `execution_roles={}` to create human roles and the three boundaries. Foundation then creates the service roles with the returned boundary ARNs. Populate `execution_roles` and any Studio/API assignments, review, and apply the IAM stack again to enable delegation and workspace access. This is an initial dependency sequence, not a new approval for every future resource matching an existing pattern. Boundary changes are applied centrally; owner inline policies stay in their component states. The boundary includes only same-owner assigned `PassRole` targets, so pipelines passing nested job roles need those assignments populated too.
 
 ## Before calling access ready
 
-Run IAM Access Analyzer policy validation against the rendered policies, then perform real MFA-protected cross-account assumption tests. Mock Terraform tests validate generated configuration; they do not execute AWS authorization or verify that every application's service dependency is satisfied. Check one positive workflow per role, including RJ uploading/replacing raw and feature objects, and negative tests for another user's role, no MFA, unrelated resources, Caden/Joe raw/feature writes, S3 object deletion, and unapproved PassRole. Use CloudTrail and exact denied API calls to refine any missing dependency.
+Run IAM Access Analyzer policy validation against the rendered user and role policies, then perform real local-user enrollment and MFA-protected role assumption tests. Mock Terraform tests validate generated configuration; they do not execute AWS authorization or verify that every application's service dependency is satisfied. Check one positive workflow per role, including RJ uploading/replacing raw and feature objects, and negative tests for another user's credentials/role, no MFA, unrelated resources, Caden/Joe raw/feature writes, S3 object deletion, and unapproved PassRole. Use CloudTrail and exact denied API calls to refine any missing dependency.
 
-For human-role or boundary changes, teammates submit a policy pull request or the denied action/resource and task; platform reviews and applies it. For their assigned execution roles' inline policies, teammates can apply changes themselves from component Terraform, within the boundary. To offboard, remove cross-account trust and revoke active sessions before deleting roles. Removing trust alone does not invalidate credentials already issued. Teammates retain their own accounts and MFA.
+For human-role or boundary changes, teammates submit a policy pull request or the denied action/resource and task; platform reviews and applies it. For assigned execution-role inline policies, teammates can apply changes themselves from component Terraform within the boundary. To offboard, disable their local console login/access keys, remove role trust/permissions as appropriate, and revoke active role sessions. Removing trust alone does not invalidate issued credentials. Administrator-managed credentials and MFA must be cleaned up before deleting the user; `force_destroy=false` prevents automatic credential deletion. Do not remove only the user resource while retaining trust configuration and assume existing role sessions are revoked.
 
 ## When Studio, MLflow, ECR, or another service is added
 
@@ -109,7 +126,9 @@ Exact actions depend on whether MLflow is local or hosted and whether ECR images
 
 ## References
 
-- [AWS cross-account roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html)
+- [Create IAM users](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_users_create.html)
+- [Enable console passwords](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_passwords_admin-change-user.html)
+- [Credential self-service and the first-login MFA caveat](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_aws_my-sec-creds-self-manage.html)
 - [MFA in role trust](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html)
 - [PassRole restrictions](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_passrole.html)
 - [Execution-role policy editing](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_update-role-permissions.html)

@@ -1,20 +1,20 @@
 # Project IAM access plan
 
-Decision: host the project in your AWS account and give each teammate a scoped cross-account role. Teammates sign in using existing IAM users with MFA in their own AWS accounts, then switch into their assigned role in the hosting account. This supersedes the earlier plan to create teammate IAM users in the hosting account. The hosting account receives the project's charges; reimbursement remains a team decision. AWS Organizations and IAM Identity Center are not required for this arrangement.
+Decision (updated November 23, 2026): host the project in your AWS account and create a separate IAM user there for each teammate. Each person signs in with their own password and MFA, then switches into their assigned project role. This replaces the earlier cross-account plan because teammates do not have existing IAM identities. Users belong to the account; teammates do not use its root identity. Use an IAM administrator for routine provisioning. The hosting account receives project charges; reimbursement remains a team decision. AWS Organizations and IAM Identity Center are not required.
 
 This is the setup specification, not a deployed configuration. A read-only STS identity check succeeded on November 21, 2026: the configured identity is `arn:aws:iam::278634873542:user/tesplin`. The configured Region is `us-east-1`. Administrative privileges and the account plan have not been verified. Resource ARNs and execution-role policies must be filled in before deployment. No IAM users, roles, or policies were created during this planning step.
 
-The development permission baseline is implemented as a reviewable [Terraform IAM stack](../../../infra/iam/README.md). It creates three cross-account roles, their policies, and three platform-owned execution-role boundaries. It outputs source-account permission snippets, Switch Role links, and boundary ARNs. It has not been applied. The README documents grants, naming patterns, exclusions, optional inputs, and workload dependencies.
+The development permission baseline is implemented as a reviewable [Terraform IAM stack](../../../infra/iam/README.md). It creates three IAM users, their scoped self-service policies, three MFA-protected project roles and their development policies, and three platform-owned execution-role boundaries. It outputs usernames, the account sign-in URL, Switch Role links, and boundary ARNs. Passwords and keys are not generated or stored in Terraform. It has not been applied. The previously checked account identity/Region still need verification at deployment time.
 
 ## People and roles
 
 Based on `../team-and-roles.md` and `../../05-diagrams/html-sources/gantt.html`:
 
-| Person | Source identity | Assigned role in hosting account | Responsibilities and access |
+| Person | IAM user in hosting account | Assigned project role | Responsibilities and access |
 |---|---|---|---|
-| RJ, Lead and ML | Existing IAM user ARN, pending | `panic-lead-ml` | Read and write project raw/features data in S3, including uploading/replacing objects; read evaluation results; write experiment artifacts, model cards, and evaluations to designated S3 prefixes; inspect project models, jobs, metrics, and logs; start the agreed training pipeline; approve/reject project model packages. |
-| Caden, MLOps and reliability | Existing IAM user ARN, pending | `panic-mlops` | Create/update/run project SageMaker pipelines and jobs; register models and deploy project endpoints; manage project monitoring jobs, dashboards, alarms, and logs; read features and scoring logs; write model and monitoring artifacts. |
-| Joe, App and business | Existing IAM user ARN, pending | `panic-app` | Manage project Lambda functions, API Gateway APIs, Step Functions workflows, SNS topics, and DynamoDB tables; invoke the project endpoint and read online features; read/write designated app data and scoring-log prefixes; read project operational metrics. |
+| RJ, Lead and ML | `panic-rj` | `panic-lead-ml` | Read and write project raw/features data in S3, including uploading/replacing objects; read evaluation results; write experiment artifacts, model cards, and evaluations to designated S3 prefixes; inspect project models, jobs, metrics, and logs; create project ML jobs, use assigned Studio/MLflow; start pipelines; approve/reject project model packages. |
+| Caden, MLOps and reliability | `panic-caden` | `panic-mlops` | Create/update/run project SageMaker pipelines and jobs; register models and deploy project endpoints; manage MLflow tracking servers and ML images; use assigned Studio; manage project monitoring jobs, dashboards, alarms, and logs; read features and scoring logs; write model and monitoring artifacts. |
+| Joe, App and business | `panic-joe` | `panic-app` | Manage project Lambda functions, assigned API Gateway APIs, Step Functions workflows, SNS topics, DynamoDB tables, and app images; invoke the project endpoint and read online features; read/write designated app data and scoring-log prefixes; read project operational metrics. |
 | You, Data and platform | `tesplin`; administrative privileges to be verified | Platform administration | Own project policies, role trust, execution roles, Terraform foundation, networking, data ingestion, Glue, Feature Store, Kinesis, EventBridge, budgets, and final teardown. Keep the root identity for account-level recovery and tasks requiring root. |
 
 Model approval ownership needs a small clarification: the Gantt assigns model approval to RJ, while the team-role document includes registry approval under Caden. Proposed resolution: RJ approves model quality; Caden implements the registry/deployment mechanism. Record any different team decision before finalizing those permissions. IAM permission to update approval status alone does not enforce an approved-model-only deployment gate; deployment code must enforce that gate too.
@@ -39,93 +39,58 @@ These are the implemented draft defaults to review before deployment:
 
 The [development service bundles](../../../infra/iam/README.md#when-studio-mlflow-ecr-or-another-service-is-added) are implemented up front. Project-named MLflow tracking servers, ML/app ECR repositories, and ML jobs are covered without listing each future resource. Studio requires exact domain/profile assignments and private-space namespaces from foundation outputs; API IDs and execution-role assignments remain explicit. The generated runtime ceilings include S3/log/metric access, image pulls, MLflow, project ML or app runtime work, and Joe's task-token callbacks. They preserve RJ-only raw/features writes and keep human-role/trust/boundary administration with platform. Initial IAM apply creates boundaries; foundation attaches them to service roles before delegation is enabled. Athena/KMS, Unified Studio, MLflow Apps, GitHub OIDC, and new service families remain explicit choices requiring scope updates. Mock tests check generated configuration; live IAM Access Analyzer validation and cross-account workflow checks remain prerequisites for deployment acceptance.
 
-## Cross-account sign-in and MFA
+## Local-user sign-in and MFA
 
-The flow is: teammate's existing IAM user with MFA -> `sts:AssumeRole` -> assigned project role in account `278634873542` -> project resources in that account. All three project roles live in the hosting account. Teammates' source-account administrator permissions do not transfer into the project role. Their own account permissions remain under their own control; we control access to the hosting account through its role trust and role permission policies.
+The flow is: individual IAM user in account `278634873542` -> password change and MFA enrollment -> MFA-authenticated `sts:AssumeRole` -> assigned project role -> project resources. Users are created under IAM path `/panic-team/`; the console username is just `panic-rj`, `panic-caden`, or `panic-joe`. Human project roles and execution-role permissions retain the agreed development scopes.
 
-We skip creating teammate IAM users, temporary passwords, password resets, and duplicate MFA registrations in the hosting account. Each teammate remains responsible for maintaining their source identity and MFA. If someone does not already have a usable IAM user with MFA, they must first set one up in their own account; a root login or a Builder ID alone is insufficient for this flow.
+### Information and setup
 
-### Information to collect
+No external account IDs, IAM user ARNs, passwords, or MFA codes are needed from teammates. Confirm who receives each username and whether they need console access, CLI access, or both.
 
-| Person | AWS account ID | Exact IAM user ARN, including any path | MFA enabled | Console / CLI needed | Can add source-account policy |
-|---|---|---|---|---|---|
-| RJ | Pending | Pending | Pending | Pending | Pending |
-| Caden | Pending | Pending | Pending | Pending | Pending |
-| Joe | Pending | Pending | Pending | Pending | Pending |
+1. Use an IAM administrator profile for the hosting account; verify account ID, privileges, and Region before planning/applying. Retain the root identity for account recovery and tasks requiring it. If the account's newer sign-up experience does not support IAM console users, confirm its supported access/activation path first; this change does not authorize an account-plan upgrade.
+2. Configure `teammate_user_names` or keep the defaults. Review Terraform's plan: it creates the three users, self-service policies, role trust, development policies, and execution-role boundaries. It creates no console passwords/access keys or MFA devices. If users already exist, inspect/import them instead of duplicating them.
+3. After apply, use IAM > Users > each user > Security credentials > Enable console access. Generate a unique temporary password and require a change at next sign-in. Deliver the account sign-in URL, username, and temporary password privately. Do not put credentials in Git, Terraform variables/state, or project documentation. The user already has permission to change their own password; no additional administrator policy is needed on the user.
+4. Each teammate signs in, replaces their temporary password, opens My security credentials, and registers MFA. Use an authenticator device name such as `panic-rj-phone`, `panic-caden-phone`, or `panic-joe-phone`; permissions cover only that user's own name or `<username>-*` device namespace. The teammate keeps their seed/QR code and MFA codes private.
+5. Sign out and sign back in with MFA, then open the assigned Switch Role link. The project's full scoped permissions activate only in that role. Without MFA, the user can perform credential onboarding but cannot assume a project role.
+6. Test their assigned-role access, a representative project task, and denial of another teammate's role or credential management. Lost MFA is recovered by the administrator after identifying the teammate. Deactivation of enrolled MFA and access-key management require an MFA-authenticated user session.
 
-Each person can obtain their current caller identity from `aws sts get-caller-identity`, or copy their IAM user ARN from the console. An ARN of the form `arn:aws:sts::...:assumed-role/...` indicates a role session rather than an IAM user and needs separate review. Never collect passwords, access keys, MFA seeds, QR codes, recovery codes, or one-time MFA codes. Account IDs and ARNs are identifiers, not credentials.
+Account sign-in URL: <https://278634873542.signin.aws.amazon.com/console/>
 
-### Setup order
-
-1. Collect and verify each teammate's exact source IAM user ARN, MFA status, and need for console/CLI access. They or their source-account administrator must be able to grant `sts:AssumeRole` on their assigned destination role.
-2. Define the full agreed project permissions and required resource ARNs for each role. Create the destination roles and policies through platform Terraform. Start with a one-hour maximum role session.
-3. Each destination role trusts only its assigned source user ARN and requires `aws:MultiFactorAuthPresent` to be true. Do not trust an entire external account without narrowing the allowed principal. Recreating a trusted IAM user may require updating the trust policy because its underlying principal ID changes.
-4. Give each teammate the small source-account permission policy below for their assigned role. They or their source administrator attach it to their IAM user or an appropriate group. This does not grant direct access to project resources; it allows obtaining the destination role's temporary credentials. Existing source-account administrator access may already allow this action, subject to other restrictions.
-5. Give each teammate their destination role ARN and Switch Role link. They sign into their source IAM user with MFA and switch into the project role. No credentials are exchanged between accounts.
-6. Confirm the assumed identity is in account `278634873542`, run a representative project task, and verify another teammate's role is inaccessible. They receive the full scoped role immediately after successful assumption; they do not need a separate staged user-enrollment policy in the hosting account.
-
-Source-account permission policy, shown for Joe; use the assigned role ARN for each person:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": "sts:AssumeRole",
-    "Resource": "arn:aws:iam::278634873542:role/panic-app"
-  }]
-}
-```
-
-Destination role trust template, shown for Joe. Replace the example account ID and user path with Joe's verified IAM user ARN before deployment. This trust policy controls who can assume the role; the role's separate permission policy controls project access.
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {"AWS": "arn:aws:iam::111122223333:user/REPLACE_WITH_JOE_USER_PATH"},
-    "Action": "sts:AssumeRole",
-    "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}}
-  }]
-}
-```
-
-Planned console links (usable only after roles and source permissions exist):
+Planned Switch Role links (usable after apply and enrollment):
 
 - RJ: <https://signin.aws.amazon.com/switchrole?account=278634873542&roleName=panic-lead-ml&displayName=PANIC-ML>
 - Caden: <https://signin.aws.amazon.com/switchrole?account=278634873542&roleName=panic-mlops&displayName=PANIC-MLOps>
 - Joe: <https://signin.aws.amazon.com/switchrole?account=278634873542&roleName=panic-app&displayName=PANIC-App>
 
+The user policy permits their own first-login password change and MFA enrollment before MFA, with no direct project-service grants. This avoids the first-login lockout caused by attaching AWS's strict generic deny-without-MFA example unchanged. Role trust and the user policy both require MFA for `AssumeRole`. No account-wide password policy is changed by Terraform.
+
 ### CLI and Terraform
 
-Use their existing source-account credential profile to obtain temporary role credentials. Example in the teammate's local AWS config for Joe; replace the source account and MFA device name:
+After MFA enrollment, a teammate who needs CLI/Terraform can return to their IAM user session (exit the project role) and create/manage their own access key while authenticated with MFA. Configure credentials privately in a local `panic-user` source profile. Terraform never creates keys, and keys alone do not allow assuming the project role without MFA.
+
+Example local AWS config for Joe with an authenticator named `panic-joe-phone`:
 
 ```ini
 [profile panic-app]
 role_arn = arn:aws:iam::278634873542:role/panic-app
-source_profile = personal
-mfa_serial = arn:aws:iam::111122223333:mfa/REPLACE_WITH_DEVICE_NAME
+source_profile = panic-user
+mfa_serial = arn:aws:iam::278634873542:mfa/panic-joe-phone
 role_session_name = joe
 duration_seconds = 3600
 region = us-east-1
 ```
 
-The source profile `personal` must resolve to the approved IAM user; configure any source credentials privately on the teammate's computer. This TOTP-based flow prompts for an MFA code when obtaining fresh role credentials. Then verify with `aws sts get-caller-identity --profile panic-app`. For Terraform, set `AWS_PROFILE=panic-app` and use `allowed_account_ids = ["278634873542"]` in the provider; set the state backend's account restriction separately if supported by the chosen backend. This helps avoid deployment into a personal account by mistake.
+The CLI prompts for a TOTP MFA code when obtaining fresh role credentials. Verify with `aws sts get-caller-identity --profile panic-app`. For Terraform, set `AWS_PROFILE=panic-app` and use `allowed_account_ids = ["278634873542"]` in the workload provider; configure the backend's account restriction separately where supported. If using a security-key-only setup, verify its supported CLI flow before relying on this TOTP example. CI will use a separate GitHub OIDC role, not a teammate's access key or MFA device.
 
-Do not store source keys, MFA codes, or session credentials in the repository or Terraform state. Teammates never give source credentials to the project administrator. For someone using only a hardware security key or a different credential provider, verify the supported CLI MFA flow before adopting this TOTP example. GitHub Actions will use a separate OIDC role in the hosting account.
-
-### Login-method exceptions
-
-This plan specifically supports an IAM user with MFA. Identity Center, other federated roles, school lab roles, and the newer AWS sign-up experience may present different source identities and policy restrictions. Federated MFA does not automatically populate `aws:MultiFactorAuthPresent` for the trust condition shown above. Confirm a supported source identity/MFA design before enabling that person's access; do not simply remove MFA enforcement to make a role session work. If a school account prevents source policy changes, use a suitable personal IAM identity or revisit the local-user option for that person.
+User identities, passwords, role trust, and boundaries are controlled by platform administration. Each teammate retains self-service credential management and their agreed execution-role inline policy access. If old cross-account trust had been deployed, reviewing/applying the revised trust and revoking any old active role sessions are part of migration; the earlier planning work did not deploy it.
 
 ## Permission changes and offboarding
 
 Teammates can deploy and manage resources allowed by their project role, including the required creation/update/read operations within the agreed scope. They cannot edit their human role's policies/trust or grant themselves another role. They can create, update, and delete inline permission policies on their explicitly assigned execution roles; trust, role creation/deletion, managed-policy editing/attachments, and permission boundaries stay with platform. Only roles with the declared platform-owned boundary attached qualify for delegation. The full human role is scoped to their responsibilities; it is not account administrator access.
 
-For new direct human access or a wider execution-role boundary, they submit an issue or pull request containing the task, exact denied API action, resource ARN, caller identity, and requested duration. Platform applies that change through Terraform. If the missing permission belongs to an assigned execution role and is already allowed by its boundary, the owner can update the inline policy themselves through their component Terraform. Their own account's administrator privileges cannot expand their destination human role's permissions.
+For new direct human access or a wider execution-role boundary, they submit an issue or pull request containing the task, exact denied API action, resource ARN, caller identity, and requested duration. Platform applies that change through Terraform. If the missing permission belongs to an assigned execution role and is already allowed by its boundary, the owner can update the inline policy themselves through their component Terraform. Credential self-service does not let them expand their human role's permissions.
 
-To offboard, remove the source identity from destination role trust and revoke active role sessions. Remove project grants and resource-policy access if any were added outside the role. Do not disable or delete identities, keys, or MFA devices in a teammate's personal account. They can remove the source `AssumeRole` permission themselves.
+To offboard, disable the teammate's local console login and access keys, remove project role access, and revoke active role sessions. Remove additional project/resource-policy grants if any exist. Clean up administrator-managed credentials and enrolled MFA before deleting the local IAM user. Terraform does not force-delete their credentials. These users are managed in the hosting account; no personal AWS account changes are involved.
 
 ## Resource boundaries
 
@@ -160,17 +125,19 @@ Grant `iam:PassRole` only for the exact execution-role ARNs a person's component
 
 1. Confirm the hosting account, administrator privileges, account plan, and Region. The earlier STS check established only the caller's identity. Confirm ownership of charges and reimbursement before inviting the team. Keep all project workloads in the hosting account; any resources a teammate runs directly in a personal account have their own billing implications.
 2. Inventory actual bucket/prefix, feature group, model package group, endpoint, API, function, workflow, table, topic, and log-group identifiers. Create the foundation and necessary service roles through platform Terraform.
-3. Translate the table above into three customer-managed role policies, three MFA-protected cross-account trust policies, and source-account `AssumeRole` policy snippets. Validate action/resource compatibility using AWS IAM Access Analyzer policy validation. Do not create teammate IAM users in the hosting account.
-4. Have teammates verify source MFA and attach their source permission policy, then test the supplied Switch Role links and any needed CLI profiles. Organizations membership is unnecessary.
-5. Verify each source identity can assume only its assigned destination role; verify attempts without MFA, from another source identity, or to assume another teammate's role fail. Verify the effective account ID before project actions.
+3. Review the three Terraform-managed IAM users, credential self-service policies, project-role policies, and MFA-protected local-user trust policies. Validate action/resource compatibility using AWS IAM Access Analyzer policy validation. No external account IDs/ARNs are needed.
+4. After the reviewed apply, enable console passwords privately, require a password reset, and have teammates enroll MFA. Test their Switch Role links and any needed CLI profiles. Organizations membership is unnecessary.
+5. Verify each IAM user can assume only its assigned role; verify password-only access, another user's credentials, and another teammate's role are inaccessible. Verify the effective account ID before project actions.
 6. Run one representative authorized task per role: RJ reads training data and writes an evaluation, Caden runs a small pipeline and deploys a test model, and Joe invokes the endpoint through an app function and writes an audit event.
 7. Verify human-role/trust/boundary changes, editing another owner's execution roles, unrelated resource access, unapproved `PassRole`, and shared raw-data deletion are denied. Verify each owner can manage their own execution-role inline policies and that the boundary limits resulting workload permissions. Fix individual missing permissions based on the failed API call rather than adding a broad full-access policy.
 8. Retain CloudTrail evidence of identity and resource changes. Test any additional API, ECR, Athena, KMS, and service-role dependencies encountered by the actual workflow before calling the role fully operational.
-9. After submission, tear down billable resources, remove cross-account trust, revoke active project role sessions, and remove project roles/policies when no longer needed. Teammates keep control of their personal IAM users and credentials.
+9. After submission, tear down billable resources, disable local teammate logins/keys, revoke active project role sessions, and clean up users, MFA, and project roles/policies when no longer needed.
 
 ## References
 
-- [AWS cross-account role setup](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html)
+- [IAM user creation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_users_create.html)
+- [Console passwords](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_passwords_admin-change-user.html)
+- [Self-service MFA/password policy caveat](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_aws_my-sec-creds-self-manage.html)
 - [MFA-protected API and role access](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html)
 - [Console role switching](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-console.html)
 - [Restricting iam:PassRole](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_passrole.html)

@@ -1,13 +1,13 @@
 # EXAMPLE ONLY. Copy to terraform.tfvars, replace every example value, and review
-# a saved plan before apply. These source users must actually exist for apply.
+# a saved plan before apply. Teammate users are created in the hosting account.
 host_account_id  = "278634873542"
 region           = "us-east-1"
 data_bucket_name = "panic-data-278634873542"
 
-source_user_arns = {
-  lead_ml = "arn:aws:iam::111122223333:user/REPLACE_WITH_RJ"
-  mlops   = "arn:aws:iam::444455556666:user/REPLACE_WITH_CADEN"
-  app     = "arn:aws:iam::777788889999:user/REPLACE_WITH_JOE"
+teammate_user_names = {
+  lead_ml = "panic-rj"
+  mlops   = "panic-caden"
+  app     = "panic-joe"
 }
 
 # Add only after platform Terraform creates APIs, service roles, and attaches

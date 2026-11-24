@@ -18,24 +18,34 @@ variable "region" {
   }
 }
 
-variable "source_user_arns" {
-  description = "Exactly three verified external IAM user ARNs: lead_ml (RJ), mlops (Caden), app (Joe). No root, assumed roles, or wildcard principals."
+variable "teammate_user_names" {
+  description = "IAM users created in the hosting account: lead_ml (RJ), mlops (Caden), app (Joe). Users receive self-service credentials and MFA-protected access to their assigned project role."
   type        = map(string)
+  default = {
+    lead_ml = "panic-rj"
+    mlops   = "panic-caden"
+    app     = "panic-joe"
+  }
   validation {
-    condition     = toset(keys(var.source_user_arns)) == toset(["lead_ml", "mlops", "app"])
+    condition     = toset(keys(var.teammate_user_names)) == toset(["lead_ml", "mlops", "app"])
     error_message = "Provide exactly the lead_ml, mlops, and app keys."
   }
   validation {
     condition = alltrue([
-      for arn in values(var.source_user_arns) :
-      can(regex("^arn:aws:iam::[0-9]{12}:user/[A-Za-z0-9+=,.@_/-]+$", arn)) &&
-      !startswith(arn, "arn:aws:iam::${var.host_account_id}:")
+      for name in values(var.teammate_user_names) :
+      can(regex("^panic-[a-z0-9-]{1,58}$", name))
     ])
-    error_message = "Each principal must be an exact IAM user ARN in an external account."
+    error_message = "Use IAM usernames beginning panic-, with lowercase letters, digits or hyphens, at most 64 characters and no paths/wildcards."
   }
   validation {
-    condition     = length(distinct(values(var.source_user_arns))) == length(var.source_user_arns)
-    error_message = "Assign a different source IAM user to each role."
+    condition     = length(distinct(values(var.teammate_user_names))) == length(var.teammate_user_names)
+    error_message = "Assign a different IAM user to each role."
+  }
+  validation {
+    condition = alltrue(flatten([for name in values(var.teammate_user_names) : [
+      for other in values(var.teammate_user_names) : name == other || !startswith(other, "${name}-")
+    ]]))
+    error_message = "Usernames must not overlap MFA name prefixes (for example panic-rj and panic-rj-other)."
   }
 }
 

@@ -23,6 +23,7 @@ What we decided and why, in order.
 | Nov 21 | Allow RJ's human role to upload/replace project S3 raw data and features | Supports ML data preparation and corrections. Caden/Joe do not gain those writes; object deletion stays excluded. Terraform updated; no apply performed. |
 | Nov 21 | Delegate each teammate's assigned execution-role inline permissions to that teammate | Owners can maintain runtime permissions themselves within a platform-controlled boundary. Human roles, execution-role trust/boundaries/creation, and cross-owner changes remain with platform. New direct human access or a wider boundary still needs a platform Terraform change. No apply performed. |
 | Nov 21 | Broaden development access within each owner's planned service families | Implement Studio assignment templates, RJ/Caden cloud job variants and MLflow, Caden/Joe ECR ownership, and central runtime boundaries in Terraform. Naming patterns cover future matching resources. IAM administration, billing, networking, API IDs, and execution-role ownership remain controlled. No apply performed. |
+| Nov 23 | Replace cross-account onboarding with individual IAM users in the hosting account | Teammates do not have existing IAM identities. Terraform now creates `panic-rj`, `panic-caden`, and `panic-joe`, scoped credential self-service, and MFA-protected access to the same project roles. Administrator sets temporary console passwords privately; teammates enroll MFA. Development scopes and execution-role ownership are retained. No apply performed. |
 
 ## Model choices
 
